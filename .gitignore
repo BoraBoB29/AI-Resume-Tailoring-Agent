@@ -1,0 +1,34 @@
+# Environment variables
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+borabob/
+venv/
+.venv/
+
+# Generated output
+output/
+
+# Generated PDFs
+*.pdf
+
+# LaTeX temporary files
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# Personal resume
+data/master_resume.yaml
+
+# OS / IDE
+.vscode/
+.DS_Store
+Thumbs.db
