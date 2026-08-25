@@ -1,0 +1,50 @@
+contact:
+  name: "Example Candidate"
+  email: "example@email.com"
+  phone: "+91 XXXXX XXXXX"
+  location: "Pune, India"
+  linkedin: "linkedin.com/in/example"
+
+summary: "Example professional summary."
+
+skills:
+  categories:
+    Data Analytics:
+      - "SQL"
+      - "Python"
+      - "Pandas"
+      - "Power BI"
+
+experience:
+  - company: "Example Company"
+    title: "Product Analyst Intern"
+    location: "Pune, India"
+    start_date: "Jan 2025"
+    end_date: "Jun 2025"
+    bullets:
+      - "Analyzed business and product data to identify trends and performance gaps."
+      - "Built dashboards to support stakeholder reporting."
+      - "Used SQL and Python for data analysis."
+
+projects:
+  - name: "Example Analytics Project"
+    bullets:
+      - "Analyzed a large dataset using Python and SQL."
+      - "Created dashboards to communicate insights."
+    tech_stack:
+      - "Python"
+      - "SQL"
+      - "Power BI"
+
+education:
+  - institution: "Example University"
+    degree: "B.Tech"
+    location: "Pune, India"
+    start_date: "2022"
+    end_date: "2026"
+    gpa: "7.5/10"
+
+certifications:
+  - name: "Example Certification"
+    issuer: "Example Issuer"
+    category: "Data Analytics"
