@@ -118,3 +118,88 @@ def test_requires_structured_requirement_list():
 
     with pytest.raises(RuntimeError, match="requirements list"):
         extract_requirements("A sufficiently long job description.", client=client)
+
+
+def test_splits_multi_tool_proficiency_requirement():
+    client = FakeClient(response([
+        requirement("Proficiency in Microsoft Excel and PowerPoint", "required")
+    ]))
+
+    result = extract_requirements("A sufficiently long job description.", client=client)
+
+    assert [item.requirement for item in result] == ["Microsoft Excel", "PowerPoint"]
+    assert all(item.evidence_level == "required" for item in result)
+
+
+def test_splits_multi_skill_sentence_and_preserves_meaning():
+    client = FakeClient(response([
+        requirement("Basic knowledge of SQL and Python for data analysis", "required")
+    ]))
+
+    result = extract_requirements("A sufficiently long job description.", client=client)
+
+    assert [item.requirement for item in result] == ["SQL", "Python", "data analysis"]
+
+
+def test_reduces_responsibility_sentences_to_atomic_phrases():
+    client = FakeClient(response([
+        requirement("Generating and submitting required metrics and reports", "required"),
+        requirement(
+            "Investigating programming or process-related issues, identifying root causes, and providing resolutions",
+            "implicit",
+        ),
+        requirement("Experience creating dashboards, KPIs, and automated reports", "preferred"),
+    ]))
+
+    result = extract_requirements("A sufficiently long job description.", client=client)
+
+    assert [item.requirement for item in result] == [
+        "Metrics reporting",
+        "Issue investigation",
+        "Root cause analysis",
+        "Problem resolution",
+        "Dashboard development",
+        "KPI reporting",
+        "Automated reporting",
+    ]
+    assert result[1].evidence_level == "implicit"
+    assert result[4].evidence_level == "preferred"
+
+
+def test_deduplicates_near_duplicate_skill_phrases():
+    client = FakeClient(response([
+        requirement("SQL", "required"),
+        requirement("Knowledge of SQL", "required"),
+        requirement("SQL querying", "required"),
+        requirement("Power BI", "preferred"),
+    ]))
+
+    result = extract_requirements("A sufficiently long job description.", client=client)
+
+    assert [item.requirement for item in result] == ["SQL", "Power BI"]
+
+
+def test_atomicization_keeps_original_supporting_evidence():
+    client = FakeClient(response([
+        requirement("Proficiency in Excel and PowerPoint", "preferred", ["JD sentence"])
+    ]))
+
+    result = extract_requirements("A sufficiently long job description.", client=client)
+
+    assert [item.supporting_evidence for item in result] == [["JD sentence"], ["JD sentence"]]
+
+
+def test_splits_including_clause_and_partial_issue_phrases():
+    client = FakeClient(response([
+        requirement("Informatica-related tools, including Panther", "required"),
+        requirement("Identifying root causes and providing resolutions", "implicit"),
+    ]))
+
+    result = extract_requirements("A sufficiently long job description.", client=client)
+
+    assert [item.requirement for item in result] == [
+        "Informatica-related tools",
+        "Panther",
+        "Root cause analysis",
+        "Problem resolution",
+    ]

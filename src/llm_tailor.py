@@ -568,7 +568,7 @@ class ResumeTailor:
 
             elif "emotorad" in company:
 
-                target = 5
+                target = 6
 
             else:
 
@@ -627,7 +627,7 @@ class ResumeTailor:
 
             elif "emotorad" in company:
 
-                current_bullets = current_bullets[:5]
+                current_bullets = current_bullets[:6]
 
             else:
 
@@ -1134,13 +1134,17 @@ EXPERIENCE
 
 TRACE LINK:
 
-Target 6–7 bullets.
+Target 6–7 bullets; prefer 7 when supported.
 
 EMOTORAD:
 
-Target 5–6 bullets.
+Target 5–6 bullets; prefer 6 when supported.
 
-Each bullet should normally be 18–30 words.
+Each bullet should normally be 18–30 words and approximately 1–2 lines in the final PDF.
+
+Prefer using the fuller, specific wording from the MASTER RESUME when it remains
+faithful. Recombine closely related source facts to add context, tools, workflows,
+stakeholders, outputs, or purpose without inventing metrics or outcomes.
 
 Use complete professional sentences.
 

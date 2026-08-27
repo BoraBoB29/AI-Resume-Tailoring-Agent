@@ -169,6 +169,13 @@ def format_education(education):
             else ""
         )
 
+        degree_text = degree
+
+        if gpa:
+            degree_text += (
+                f" \\quad|\\quad GPA: {escape_latex(gpa)}"
+            )
+
         output.append(
             rf"""
 \noindent
@@ -178,23 +185,12 @@ def format_education(education):
 
 \\[-1pt]
 
-\textit{{\small {degree}}}
+\textit{{\small {degree_text}}}
 \hfill
 \small {location}
 """
         )
 
-        if gpa:
-
-            output.append(
-                rf"""
-\\[-1pt]
-\small
-GPA: {escape_latex(gpa)}
-"""
-            )
-
-        # Gap between education entries
         if index < len(education) - 1:
 
             output.append(
@@ -242,12 +238,7 @@ def format_skills(skills):
         )
 
         output.append(
-            rf"""
-\resumeItem{{
-\textbf{{{category_text}:}}
-{skills_text}
-}}
-"""
+            rf"\textbf{{{category_text}:}} {skills_text}\\[-1pt]"
         )
 
     return "\n".join(
@@ -329,7 +320,6 @@ def format_experience(experience):
             r"\end{resumeItemize}"
         )
 
-        # Gap between experiences
         if index < len(experience) - 1:
 
             output.append(
@@ -346,38 +336,26 @@ def format_experience(experience):
 # ============================================================
 
 def format_projects(projects):
-    """
-    Render projects as:
-
-    • Project Title - Description
-
-    Each project is one bullet.
-    The title is bold.
-    The description is a single concise sentence.
-    The description may naturally wrap to a second line.
-    """
 
     output = []
 
     for index, project in enumerate(projects):
 
-        if not isinstance(project, dict):
+        if not isinstance(
+            project,
+            dict
+        ):
             continue
 
-        # --------------------------------------------------
-        # PROJECT TITLE
-        # --------------------------------------------------
-
         name = str(
-            project.get("name", "")
+            project.get(
+                "name",
+                ""
+            )
         ).strip()
 
         if not name:
             continue
-
-        # --------------------------------------------------
-        # PROJECT DESCRIPTION
-        # --------------------------------------------------
 
         bullets = project.get(
             "bullets",
@@ -399,13 +377,7 @@ def format_projects(projects):
         if not descriptions:
             continue
 
-        # Use ONLY the first bullet as the visible
-        # project description.
         description = descriptions[0]
-
-        # --------------------------------------------------
-        # RENDER ONE PROJECT = ONE BULLET
-        # --------------------------------------------------
 
         output.append(
             rf"""
@@ -417,26 +389,22 @@ def format_projects(projects):
 """
         )
 
-        # --------------------------------------------------
-        # SMALL GAP BETWEEN PROJECTS
-        # --------------------------------------------------
-
         if index < len(projects) - 1:
 
             output.append(
                 r"\vspace{2pt}"
             )
 
-    return "\n".join(output)
+    return "\n".join(
+        output
+    )
 
 
 # ============================================================
 # CERTIFICATIONS
 # ============================================================
 
-def format_certifications(
-    certifications
-):
+def format_certifications(certifications):
 
     output = []
 
@@ -462,19 +430,14 @@ def format_certifications(
             )
 
             if issuer:
-
                 output.append(
                     f"{name} ({issuer})"
                 )
-
             else:
-
                 output.append(
                     name
                 )
-
         else:
-
             output.append(
                 escape_latex(cert)
             )
@@ -509,89 +472,52 @@ def render_latex(
         encoding="utf-8"
     )
 
-    contact = format_contact(
-        tailored.get(
-            "contact",
-            {}
-        )
-    )
-
-    summary = format_summary(
-        tailored.get(
-            "summary",
-            ""
-        )
-    )
-
-    education = format_education(
-        tailored.get(
-            "education",
-            []
-        )
-    )
-
-    skills = format_skills(
-        tailored.get(
-            "skills",
-            {}
-        )
-    )
-
-    experience = format_experience(
-        tailored.get(
-            "experience",
-            []
-        )
-    )
-
-    projects = format_projects(
-        tailored.get(
-            "projects",
-            []
-        )
-    )
-
-    # --------------------------------------------------------
-    # Certifications are intentionally not a separate section
-    # if your template does not contain one.
-    #
-    # If your template later includes <<CERTIFICATIONS>>,
-    # this value is ready.
-    # --------------------------------------------------------
-
-    certifications = format_certifications(
-        tailored.get(
-            "certifications",
-            []
-        )
-    )
-
     replacements = {
-
-        "<<CONTACT>>":
-            contact,
-
-        "<<SUMMARY>>":
-            summary,
-
-        "<<EDUCATION>>":
-            education,
-
-        "<<SKILLS>>":
-            skills,
-
-        "<<EXPERIENCE>>":
-            experience,
-
-        "<<PROJECTS>>":
-            projects,
-
-        "<<CERTIFICATIONS>>":
-            certifications,
+        "<<CONTACT>>": format_contact(
+            tailored.get(
+                "contact",
+                {}
+            )
+        ),
+        "<<SUMMARY>>": format_summary(
+            tailored.get(
+                "summary",
+                ""
+            )
+        ),
+        "<<EDUCATION>>": format_education(
+            tailored.get(
+                "education",
+                []
+            )
+        ),
+        "<<SKILLS>>": format_skills(
+            tailored.get(
+                "skills",
+                {}
+            )
+        ),
+        "<<EXPERIENCE>>": format_experience(
+            tailored.get(
+                "experience",
+                []
+            )
+        ),
+        "<<PROJECTS>>": format_projects(
+            tailored.get(
+                "projects",
+                []
+            )
+        ),
+        "<<CERTIFICATIONS>>": format_certifications(
+            tailored.get(
+                "certifications",
+                []
+            )
+        ),
     }
 
     for placeholder, value in replacements.items():
-
         template = template.replace(
             placeholder,
             value

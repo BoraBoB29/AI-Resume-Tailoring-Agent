@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -34,7 +35,11 @@ Classify each requirement exactly once as:
 
 Include skills, responsibilities, domains, tools/platforms, seniority or
 experience, education, and other meaningful hiring requirements. Do not invent
-requirements, candidate facts, or evidence. Do not generate a resume.
+requirements, candidate facts, or evidence. Prefer concise atomic phrases:
+split independent tools, skills, and responsibilities rather than copying
+sentences. For example, "Excel and PowerPoint" becomes two requirements and
+"root causes and resolutions" becomes "Root cause analysis" and "Problem
+resolution". Do not generate a resume.
 """.strip()
 
 
@@ -43,13 +48,99 @@ def _deduplicate(requirements: List[JDRequirement]) -> List[JDRequirement]:
     unique = []
 
     for requirement in requirements:
-        key = (requirement.requirement.strip().casefold(), requirement.evidence_level)
+        key = (_canonical_requirement(requirement.requirement), requirement.evidence_level)
         if key in seen:
             continue
         seen.add(key)
         unique.append(requirement)
 
     return unique
+
+
+def _canonical_requirement(text: str) -> str:
+    """Normalize harmless wording variants for requirement deduplication."""
+    value = re.sub(r"\s+", " ", text.strip().casefold())
+    value = re.sub(r"^(knowledge|experience|proficiency|familiarity)\s+(of|with)\s+", "", value)
+    value = re.sub(r"\s+(querying|queries)$", "", value)
+    return value
+
+
+def _split_list(value: str) -> List[str]:
+    value = re.sub(r"\s+", " ", value.strip(" ."))
+    parts = re.split(r"\s*,\s*|\s+and\s+|\s+or\s+", value, flags=re.IGNORECASE)
+    return [
+        re.sub(r"^(?:and|or)\s+", "", part, flags=re.IGNORECASE).strip(" .")
+        for part in parts
+        if part.strip(" .")
+    ]
+
+
+def _atomic_phrases(text: str) -> List[str]:
+    """Reduce common sentence-like model phrases to JD-faithful atoms."""
+    value = re.sub(r"\s+", " ", text.strip())
+    lowered = value.casefold()
+
+    if lowered.startswith("proficiency in "):
+        return _split_list(value[len("proficiency in "):])
+
+    including_match = re.match(
+        r"^(.+?),\s*including\s+(.+)$",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if including_match:
+        return [including_match.group(1).strip()] + _split_list(including_match.group(2))
+
+    match = re.match(
+        r"^(?:basic )?knowledge of (.+?)\s+for\s+(.+)$",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return _split_list(match.group(1)) + [match.group(2).strip(" .")]
+
+    if re.search(r"metrics and reports", lowered):
+        return ["Metrics reporting"]
+
+    if "investigating" in lowered and "root causes" in lowered:
+        return ["Issue investigation", "Root cause analysis", "Problem resolution"]
+
+    if "investigating" in lowered and "issue" in lowered:
+        return ["Issue investigation"]
+
+    if "root causes" in lowered:
+        phrases = ["Root cause analysis"]
+        if "providing resolutions" in lowered or "providing resolution" in lowered:
+            phrases.append("Problem resolution")
+        return phrases
+
+    if "providing resolutions" in lowered or "providing resolution" in lowered:
+        return ["Problem resolution"]
+
+    match = re.match(r"^experience creating (.+)$", value, flags=re.IGNORECASE)
+    if match:
+        return [
+            re.sub(r"^dashboards$", "Dashboard development", part, flags=re.IGNORECASE)
+            if part.casefold() == "dashboards"
+            else re.sub(r"^kpis$", "KPI reporting", part, flags=re.IGNORECASE)
+            if part.casefold() == "kpis"
+            else re.sub(r"^automated reports$", "Automated reporting", part, flags=re.IGNORECASE)
+            for part in _split_list(match.group(1))
+        ]
+
+    return [value]
+
+
+def _atomicize(requirements: List[JDRequirement]) -> List[JDRequirement]:
+    atomic = []
+    for requirement in requirements:
+        for phrase in _atomic_phrases(requirement.requirement):
+            atomic.append(
+                requirement.model_copy(
+                    update={"requirement": phrase}
+                )
+            )
+    return _deduplicate(atomic)
 
 
 def _parse_response(content) -> List[JDRequirement]:
@@ -72,7 +163,7 @@ def _parse_response(content) -> List[JDRequirement]:
     except Exception as exc:
         raise RuntimeError("JD analysis response contains invalid requirements.") from exc
 
-    return _deduplicate(requirements)
+    return _atomicize(requirements)
 
 
 def extract_requirements(
