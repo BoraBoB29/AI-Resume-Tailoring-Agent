@@ -1,47 +1,32 @@
 from pathlib import Path
-import yaml
 
-from src.latex_renderer import LatexRenderer
-
-
-MASTER_RESUME = Path(
-    "data/master_resume.yaml"
-)
+from src.latex_renderer import render_latex
 
 
-with open(
-    MASTER_RESUME,
-    "r",
-    encoding="utf-8"
-) as file:
+def test_render_latex_writes_resume_content(tmp_path):
+    resume = {
+        "contact": {
+            "name": "Test Candidate",
+            "email": "candidate@example.com",
+            "phone": "555-0100",
+            "linkedin": "linkedin.com/in/candidate",
+            "location": "Pune, India",
+        },
+        "summary": "A concise test summary.",
+        "education": [],
+        "skills": {"categories": {"Tools": ["Python", "SQL"]}},
+        "experience": [],
+        "projects": [],
+        "certifications": [],
+    }
+    template_path = Path("templates/resume_template.tex")
+    output_path = tmp_path / "resume.tex"
 
-    resume = yaml.safe_load(file)
+    result = render_latex(resume, template_path, output_path)
 
-
-renderer = LatexRenderer()
-
-output = renderer.render(
-    resume,
-    "master_resume_test.tex"
-)
-
-
-print()
-print("==============================")
-print("RENDERER TEST SUCCESS")
-print("==============================")
-
-print(
-    "Generated:",
-    output
-)
-
-print(
-    "Certifications:",
-    len(
-        resume.get(
-            "certifications",
-            []
-        )
-    )
-)
+    assert result == output_path
+    assert output_path.exists()
+    rendered = output_path.read_text(encoding="utf-8")
+    assert "Test Candidate" in rendered
+    assert "A concise test summary." in rendered
+    assert "Python" in rendered

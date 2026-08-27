@@ -1,3 +1,13 @@
+import sys
+
+if "pytest" in sys.modules:
+    import pytest
+
+    pytest.skip(
+        "Manual Mistral tailoring script; run directly when API access is intended.",
+        allow_module_level=True,
+    )
+
 import yaml
 from pathlib import Path
 from dotenv import load_dotenv

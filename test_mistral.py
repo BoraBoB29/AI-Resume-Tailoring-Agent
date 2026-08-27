@@ -1,3 +1,13 @@
+import sys
+
+if "pytest" in sys.modules:
+    import pytest
+
+    pytest.skip(
+        "Manual Mistral smoke script; run directly when API access is intended.",
+        allow_module_level=True,
+    )
+
 import os
 
 from dotenv import load_dotenv

@@ -11,8 +11,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 # --- API / model config -----------------------------------------------------
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 LATEX_ENGINE = os.getenv("LATEX_ENGINE", "pdflatex")  # "tectonic" or "pdflatex"
 
 # --- Paths -------------------------------------------------------------------
@@ -28,7 +26,3 @@ RESUME_TEMPLATE_PATH = TEMPLATES_DIR / "resume_template.tex"
 for d in (OUTPUT_TEX_DIR, OUTPUT_PDF_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
-if not ANTHROPIC_API_KEY:
-    # Don't crash on import (e.g. during testing of non-LLM parts),
-    # but calls to the LLM tailor module will fail loudly with a clear message.
-    pass

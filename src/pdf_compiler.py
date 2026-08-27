@@ -10,11 +10,26 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from pypdf import PdfReader
+
 from src import config
 
 
 class LatexCompilationError(RuntimeError):
     pass
+
+
+def get_pdf_page_count(pdf_path: Path) -> int:
+    """Return the number of pages in an existing PDF."""
+    pdf_path = Path(pdf_path)
+
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"PDF not found: {pdf_path}")
+
+    try:
+        return len(PdfReader(str(pdf_path)).pages)
+    except Exception as exc:
+        raise ValueError(f"Invalid PDF: {pdf_path}") from exc
 
 
 def _check_engine_available(engine: str):

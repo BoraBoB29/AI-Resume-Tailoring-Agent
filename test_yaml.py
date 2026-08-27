@@ -1,3 +1,13 @@
+import sys
+
+if "pytest" in sys.modules:
+    import pytest
+
+    pytest.skip(
+        "Manual YAML inspection script; run directly when inspection is intended.",
+        allow_module_level=True,
+    )
+
 import yaml
 
 

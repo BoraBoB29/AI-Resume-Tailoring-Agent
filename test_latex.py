@@ -1,3 +1,13 @@
+import sys
+
+if "pytest" in sys.modules:
+    import pytest
+
+    pytest.skip(
+        "Manual LaTeX smoke script; run directly when compilation is intended.",
+        allow_module_level=True,
+    )
+
 import subprocess
 from pathlib import Path
 

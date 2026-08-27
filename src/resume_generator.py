@@ -23,7 +23,7 @@ import yaml
 from src import config
 from src.llm_tailor import tailor_resume
 from src.latex_renderer import render_latex
-from src.pdf_compiler import compile_pdf
+from src.pdf_compiler import compile_pdf, get_pdf_page_count
 
 
 # ============================================================
@@ -201,6 +201,14 @@ def generate_resume(
         tex_output_path,
         config.OUTPUT_PDF_DIR
     )
+
+    page_count = get_pdf_page_count(pdf_path)
+
+    if page_count != 1:
+        raise RuntimeError(
+            f"Generated resume exceeds one page: "
+            f"{page_count} pages detected."
+        )
 
     print(
         f"Done: {pdf_path}"
