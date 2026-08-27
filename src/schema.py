@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Literal
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -310,7 +310,11 @@ class JDRequirement(BaseModel):
 
     requirement: str
 
-    evidence_level: str
+    evidence_level: Literal[
+        "required",
+        "preferred",
+        "implicit"
+    ]
 
     supporting_evidence: List[str] = Field(
         default_factory=list

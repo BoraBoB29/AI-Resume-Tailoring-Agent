@@ -21,6 +21,7 @@ from pathlib import Path
 import yaml
 
 from src import config
+from src.jd_analyzer import extract_requirements, print_analysis
 from src.llm_tailor import tailor_resume
 from src.latex_renderer import render_latex
 from src.pdf_compiler import compile_pdf, get_pdf_page_count
@@ -126,16 +127,18 @@ def generate_resume(
     )
 
     # --------------------------------------------------------
-    # Tailor
+    # Analyze JD and tailor
     # --------------------------------------------------------
 
-    print(
-        "[1/3] Analyzing JD and tailoring resume..."
-    )
+    print("[1/4] Analyzing job description...")
+
+    jd_requirements = extract_requirements(job_description)
+    print_analysis(jd_requirements)
 
     tailored = tailor_resume(
         master_resume,
-        job_description
+        job_description,
+        jd_requirements
     )
 
     # --------------------------------------------------------
@@ -179,7 +182,7 @@ def generate_resume(
     )
 
     print(
-        f"[2/3] Rendering LaTeX -> "
+        f"[2/4] Rendering LaTeX -> "
         f"{tex_output_path}"
     )
 
@@ -194,7 +197,7 @@ def generate_resume(
     # --------------------------------------------------------
 
     print(
-        "[3/3] Compiling PDF..."
+        "[3/4] Compiling PDF..."
     )
 
     pdf_path = compile_pdf(

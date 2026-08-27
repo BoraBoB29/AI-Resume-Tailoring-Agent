@@ -44,7 +44,7 @@ def test_generate_resume_rejects_multi_page_output(tmp_path, monkeypatch):
     pdf_path = tmp_path / "generated.pdf"
     write_pdf(pdf_path, 2)
     monkeypatch.setattr(resume_generator, "load_master_resume", lambda path: {})
-    monkeypatch.setattr(resume_generator, "tailor_resume", lambda master, jd: {})
+    monkeypatch.setattr(resume_generator, "tailor_resume", lambda master, jd, requirements: {})
     monkeypatch.setattr(resume_generator, "render_latex", lambda *args: None)
     monkeypatch.setattr(resume_generator, "compile_pdf", lambda *args: pdf_path)
 

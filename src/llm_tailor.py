@@ -1020,7 +1020,8 @@ class ResumeTailor:
     def tailor(
         self,
         master_resume,
-        job_description
+        job_description,
+        jd_requirements=None
     ):
 
         master_resume_json = json.dumps(
@@ -1403,6 +1404,12 @@ JOB DESCRIPTION
 {job_description}
 
 
+STRUCTURED JOB REQUIREMENTS
+============================================================
+
+{json.dumps([item.model_dump() for item in (jd_requirements or [])], indent=2)}
+
+
 ============================================================
 TASK
 ============================================================
@@ -1752,12 +1759,14 @@ Requirements:
 
 def tailor_resume(
     master_resume,
-    job_description
+    job_description,
+    jd_requirements=None
 ):
 
     tailor = ResumeTailor()
 
     return tailor.tailor(
         master_resume,
-        job_description
+        job_description,
+        jd_requirements
     )
