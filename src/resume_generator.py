@@ -21,6 +21,7 @@ from pathlib import Path
 import yaml
 
 from src import config
+from src.ats_scorer import print_ats_score, score_keyword_coverage
 from src.evidence_matcher import match_evidence
 from src.jd_analyzer import extract_requirements, print_analysis
 from src.llm_tailor import tailor_resume
@@ -145,6 +146,12 @@ def generate_resume(
         job_description,
         jd_requirements
     )
+
+    ats_score = score_keyword_coverage(
+        tailored,
+        jd_requirements
+    )
+    print_ats_score(ats_score)
 
     # --------------------------------------------------------
     # Filename
