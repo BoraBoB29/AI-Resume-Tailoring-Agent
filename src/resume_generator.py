@@ -21,6 +21,7 @@ from pathlib import Path
 import yaml
 
 from src import config
+from src.evidence_matcher import match_evidence
 from src.jd_analyzer import extract_requirements, print_analysis
 from src.llm_tailor import tailor_resume
 from src.latex_renderer import render_latex
@@ -133,6 +134,10 @@ def generate_resume(
     print("[1/4] Analyzing job description...")
 
     jd_requirements = extract_requirements(job_description)
+    jd_requirements = match_evidence(
+        jd_requirements,
+        master_resume
+    )
     print_analysis(jd_requirements)
 
     tailored = tailor_resume(
