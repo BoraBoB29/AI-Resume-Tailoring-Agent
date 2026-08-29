@@ -37,6 +37,7 @@ def escape_latex(text):
 # ============================================================
 
 def format_contact(contact):
+
     name = escape_latex(contact.get("name", ""))
     email = escape_latex(contact.get("email", ""))
     phone = escape_latex(contact.get("phone", ""))
@@ -45,33 +46,28 @@ def format_contact(contact):
     portfolio = escape_latex(contact.get("portfolio", ""))
     location = escape_latex(contact.get("location", ""))
 
-    parts = []
+    email_link = email
+    linkedin_link = (
+        rf"\href{{https://{linkedin}}}{{{linkedin}}}"
+        if linkedin else ""
+    )
+    github_link = (
+        rf"\enspace $|$ \enspace\href{{https://{github}}}{{{github}}}"
+        if github else ""
+    )
+    portfolio_link = (
+        rf"\enspace $|$ \enspace\href{{https://{portfolio}}}{{{portfolio}}}"
+        if portfolio else ""
+    )
 
-    if email:
-        parts.append(email)
-
-    if phone:
-        parts.append(phone)
-
-    if linkedin:
-        parts.append(
-            rf"\href{{https://{linkedin}}}{{{linkedin}}}"
-        )
-
-    if github:
-        parts.append(
-            rf"\href{{https://{github}}}{{{github}}}"
-        )
-
-    if portfolio:
-        parts.append(
-            rf"\href{{https://{portfolio}}}{{{portfolio}}}"
-        )
+    contact_line = (
+        f"{email_link}\\enspace $|$ \\enspace {phone}"
+        f"\\enspace $|$ \\enspace {linkedin_link}"
+        f"{github_link}{portfolio_link}"
+    )
 
     if location:
-        parts.append(location)
-
-    contact_line = r"\enspace $|$ \enspace ".join(parts)
+        contact_line += rf"\enspace $|$ \enspace {location}"
 
     return rf"""
 \begin{{center}}
@@ -360,24 +356,62 @@ def format_experience(experience):
 # ============================================================
 
 def format_projects(projects):
-    if not projects:
-        return ""
 
     output = []
 
-    for project in projects:
-        name = escape_latex(project.get("name", ""))
-        bullets = project.get("bullets", []) or []
+    for index, project in enumerate(projects):
 
-        # Exactly ONE description per project.
-        # The first bullet is the complete project description.
-        description = escape_latex(str(bullets[0])) if bullets else ""
+        if not isinstance(
+            project,
+            dict
+        ):
+            continue
 
-        output.append(
-            rf"\resumeItem{{\textbf{{{name}}} -- {description}}}"
+        name = str(
+            project.get(
+                "name",
+                ""
+            )
+        ).strip()
+
+        if not name:
+            continue
+
+        bullets = project.get(
+            "bullets",
+            []
         )
 
-    return "\n".join(output) + "\n"
+        if not isinstance(
+            bullets,
+            list
+        ):
+            bullets = []
+
+        descriptions = [
+            str(b).strip()
+            for b in bullets
+            if str(b).strip()
+        ]
+
+        if not descriptions:
+            continue
+
+        description = descriptions[0]
+        output.append(
+            rf"\resumeItem{{\textbf{{{escape_latex(name)}}} - {escape_latex(description)}}}"
+        )
+
+        if index < len(projects) - 1:
+
+            output.append(
+                r"\vspace{2pt}"
+            )
+
+    return "\n".join(
+        output
+    )
+
 
 # ============================================================
 # CERTIFICATIONS

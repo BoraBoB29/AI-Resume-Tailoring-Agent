@@ -103,6 +103,24 @@ def test_normalize_skills_falls_back_for_missing_or_malformed(tailor, master_res
         assert result["skills"]["categories"] == master_resume["skills"]["categories"]
 
 
+def test_normalize_skills_preserves_canonical_categories_and_items(tailor, master_resume):
+    result = tailor._normalize_skills(
+        {"skills": {"categories": {"Languages": ["Python"]}}},
+        master_resume,
+    )
+
+    assert result["skills"]["categories"]["Languages"] == ["Python", "SQL"]
+
+
+def test_normalize_skills_bounds_categories_and_values(tailor):
+    categories = {f"Category {index}": [f"Skill {value}" for value in range(12)] for index in range(10)}
+    result = tailor._normalize_skills({"skills": None}, {"skills": {"categories": categories}})
+
+    assert len(result["skills"]["categories"]) <= 6
+    assert all(len(values) == 8 for values in result["skills"]["categories"].values())
+    assert "Additional Skills" not in result["skills"]["categories"]
+
+
 def test_normalize_experience_normalizes_bullets_and_missing_fields(tailor):
     data = {"experience": [{"company": "Acme", "bullets": "  Built dashboards  "}, {"company": "Empty"}]}
 
@@ -119,13 +137,22 @@ def test_normalize_projects_filters_invalid_names_and_backfills(tailor, master_r
     result = tailor._normalize_projects(data, master_resume)
 
     assert [project["name"] for project in result["projects"]] == ["Canonical Project", "Second Project", "Third Project"]
-    assert result["projects"][0]["bullets"] == ["Custom result"]
+    assert result["projects"][0]["bullets"] == ["Custom result", "Built the project"]
 
 
 def test_normalize_projects_handles_malformed_input(tailor, master_resume):
     result = tailor._normalize_projects({"projects": "invalid"}, master_resume)
 
     assert len(result["projects"]) == 3
+
+
+def test_normalize_projects_backfills_second_canonical_bullet(tailor, master_resume):
+    result = tailor._normalize_projects(
+        {"projects": [{"name": "Canonical Project", "bullets": ["Custom result"]}]},
+        master_resume,
+    )
+
+    assert result["projects"][0]["bullets"] == ["Custom result", "Built the project"]
 
 
 def test_normalize_certifications_supports_strings_and_dicts(tailor, master_resume):
@@ -151,6 +178,24 @@ def test_experience_content_floor_deduplicates_and_backfills(tailor, master_resu
     assert result["experience"][0]["bullets"] == ["Built dashboards", "Automated reports", "Improved data quality", "Presented insights"]
 
 
+def test_experience_content_floor_uses_main_entry_targets(tailor):
+    master = {
+        "experience": [
+            {"company": "TraceLink Inc.", "bullets": [str(index) for index in range(8)]},
+            {"company": "Emotorad (Cycles & E-Bikes)", "bullets": [str(index) for index in range(8)]},
+        ]
+    }
+    result = {"experience": [
+        {"company": "TraceLink Inc.", "bullets": []},
+        {"company": "Emotorad (Cycles & E-Bikes)", "bullets": []},
+    ]}
+
+    tailor._ensure_experience_content_floor(result, master)
+
+    assert len(result["experience"][0]["bullets"]) == 7
+    assert len(result["experience"][1]["bullets"]) == 6
+
+
 def test_project_content_floor_backfills_missing_bullets(tailor, master_resume):
     result = {"projects": [{"name": "Canonical Project", "bullets": ["Custom result"]}]}
 
@@ -165,3 +210,22 @@ def test_project_content_floor_ignores_invalid_project(tailor, master_resume):
     tailor._ensure_project_content_floor(result, master_resume)
 
     assert result["projects"][0]["bullets"] == []
+
+
+def test_normalize_skills_uses_generalized_categories_and_filters_workato(tailor):
+    master = {"skills": {"categories": {
+        "Technical Skills": ["SQL", "Python", "Workato"],
+        "Reporting and Visualization": ["Power BI", "Excel"],
+        "Professional Strengths": ["Collaboration", "Communication"],
+    }}}
+    result = tailor._normalize_skills({"skills": {"categories": {
+        "Technical Skills": ["SQL"],
+        "Reporting and Visualization": ["Power BI"],
+    }}}, master)
+    categories = result["skills"]["categories"]
+    assert "Technical Skills" not in categories
+    assert "Tools & Platforms" in categories
+    assert "Reporting & Visualization" in categories
+    assert all("Workato".casefold() != value.casefold() for values in categories.values() for value in values)
+    assert "Additional Skills" not in categories
+    assert len(categories) <= 6

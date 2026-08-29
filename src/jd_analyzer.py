@@ -8,6 +8,7 @@ from typing import List, Optional
 from dotenv import load_dotenv
 from mistralai.client import Mistral
 
+from src.mistral_client import complete_with_retries, env_int
 from src.schema import JDRequirement
 
 
@@ -128,7 +129,60 @@ def _atomic_phrases(text: str) -> List[str]:
             for part in _split_list(match.group(1))
         ]
 
+    generic_split = _generic_list_split(value)
+    if generic_split:
+        return generic_split
+
     return [value]
+
+
+# Common responsibility/action verbs. When a phrase contains one of these,
+# it reads as a single clause ("design and implement pipelines") rather than
+# a list of independent tools/skills ("Java and C++"), so the generic list
+# splitter below skips it and leaves the phrase intact.
+_CLAUSE_VERBS = {
+    "analyze", "analyzing", "assist", "assisting", "build", "building",
+    "collaborate", "collaborating", "communicate", "communicating",
+    "conduct", "conducting", "coordinate", "coordinating", "create",
+    "creating", "design", "designing", "develop", "developing", "ensure",
+    "ensuring", "implement", "implementing", "lead", "leading", "maintain",
+    "maintaining", "manage", "managing", "monitor", "monitoring", "perform",
+    "performing", "support", "supporting",
+}
+
+
+def _generic_list_split(value: str) -> List[str]:
+    """
+    Best-effort fallback for JD phrasing not covered by a specific rule
+    above: split short comma/"and"/"or" lists of tool- or skill-like nouns
+    (e.g. "Java and C++", "Slack, Notion, and Confluence") into separate
+    atomic requirements.
+
+    Deliberately conservative: skips phrases containing a responsibility
+    verb (see _CLAUSE_VERBS) and phrases that don't cleanly resolve into
+    several short items, since misreading a single responsibility as a list
+    is worse than leaving an unfamiliar phrase unsplit.
+    """
+
+    if not re.search(r",\s+|\s+and\s+|\s+or\s+", value, flags=re.IGNORECASE):
+        return []
+
+    if len(value.split()) > 8:
+        return []
+
+    words = {word.casefold().strip(".,") for word in value.split()}
+    if words & _CLAUSE_VERBS:
+        return []
+
+    candidates = _split_list(value)
+
+    if len(candidates) < 2:
+        return []
+
+    if not all(1 <= len(candidate.split()) <= 4 for candidate in candidates):
+        return []
+
+    return candidates
 
 
 def _atomicize(requirements: List[JDRequirement]) -> List[JDRequirement]:
@@ -184,16 +238,26 @@ def extract_requirements(
             raise RuntimeError(
                 "MISTRAL_API_KEY is not set. Check your .env file."
             )
-        client = Mistral(api_key=api_key)
+        client = Mistral(
+            api_key=api_key,
+            timeout_ms=env_int(
+                "MISTRAL_TIMEOUT_MS",
+                180000,
+                minimum=1000,
+            ),
+        )
 
-    response = client.chat.complete(
-        model=model or os.getenv("MISTRAL_MODEL", "mistral-large-latest"),
-        messages=[
-            {"role": "system", "content": EXTRACTION_PROMPT},
-            {"role": "user", "content": job_description},
-        ],
-        temperature=0,
-        response_format={"type": "json_object"},
+    response = complete_with_retries(
+        client,
+        {
+            "model": model or os.getenv("MISTRAL_MODEL", "mistral-large-latest"),
+            "messages": [
+                {"role": "system", "content": EXTRACTION_PROMPT},
+                {"role": "user", "content": job_description},
+            ],
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        },
     )
 
     try:

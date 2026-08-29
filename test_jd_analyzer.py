@@ -189,6 +189,53 @@ def test_atomicization_keeps_original_supporting_evidence():
     assert [item.supporting_evidence for item in result] == [["JD sentence"], ["JD sentence"]]
 
 
+def test_generic_fallback_splits_unfamiliar_tool_list():
+    client = FakeClient(response([
+        requirement("Java and C++", "required"),
+    ]))
+
+    result = extract_requirements("A sufficiently long job description.", client=client)
+
+    assert [item.requirement for item in result] == ["Java", "C++"]
+
+
+def test_generic_fallback_splits_unfamiliar_comma_list():
+    client = FakeClient(response([
+        requirement("Slack, Notion, and Confluence", "preferred"),
+    ]))
+
+    result = extract_requirements("A sufficiently long job description.", client=client)
+
+    assert [item.requirement for item in result] == ["Slack", "Notion", "Confluence"]
+
+
+def test_generic_fallback_does_not_split_a_single_responsibility_clause():
+    client = FakeClient(response([
+        requirement("Design and implement data pipelines", "required"),
+    ]))
+
+    result = extract_requirements("A sufficiently long job description.", client=client)
+
+    # Contains a responsibility verb ("design"/"implement"), so this is one
+    # clause, not a list of tools -- must be left intact, not mis-split.
+    assert [item.requirement for item in result] == ["Design and implement data pipelines"]
+
+
+def test_generic_fallback_does_not_split_long_descriptive_phrase():
+    client = FakeClient(response([
+        requirement(
+            "Strong written and verbal communication skills across teams",
+            "implicit",
+        ),
+    ]))
+
+    result = extract_requirements("A sufficiently long job description.", client=client)
+
+    assert [item.requirement for item in result] == [
+        "Strong written and verbal communication skills across teams"
+    ]
+
+
 def test_splits_including_clause_and_partial_issue_phrases():
     client = FakeClient(response([
         requirement("Informatica-related tools, including Panther", "required"),

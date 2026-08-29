@@ -156,11 +156,11 @@
 \section*{Skills}
 
 <<SKILLS>>
-\vspace{-3pt}
+
 \small
 \textbf{Certifications:}
 \hspace{2pt}
-<<CERTIFICATIONS>>\\[-2pt]
+<<CERTIFICATIONS>>\\[-1pt]
 
 % ============================================================
 % EXPERIENCE

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.latex_renderer import format_education, render_latex
+from src.latex_renderer import format_contact, format_education, format_projects, render_latex
 
 
 def test_render_latex_writes_resume_content(tmp_path):
@@ -54,3 +54,83 @@ def test_format_education_keeps_gpa_and_school_percentages_intact():
     assert "B.Tech – Robotics and Automation \\quad|\\quad GPA: 7.5/10" in rendered
     assert "GPA: 7.5/10\n" not in rendered
     assert "Class XII: 95.25\\% | Class X: 93.00\\%" in rendered
+
+
+def test_format_education_renders_details_field():
+    rendered = format_education([
+        {
+            "institution": "Example University",
+            "degree": "B.Tech",
+            "location": "Pune, India",
+            "start_date": "2022",
+            "end_date": "2026",
+            "gpa": "7.5/10",
+            "details": ["Class XII: 95.25%", "Class X: 93.00%"],
+        },
+    ])
+
+    assert "Class XII: 95.25\\% | Class X: 93.00\\%" in rendered
+
+
+def test_format_education_omits_details_block_when_empty():
+    with_empty_details = format_education([
+        {
+            "institution": "Example University",
+            "degree": "B.Tech",
+            "location": "Pune, India",
+            "start_date": "2022",
+            "end_date": "2026",
+            "details": [],
+        },
+    ])
+    without_details_key = format_education([
+        {
+            "institution": "Example University",
+            "degree": "B.Tech",
+            "location": "Pune, India",
+            "start_date": "2022",
+            "end_date": "2026",
+        },
+    ])
+
+    # An empty/missing details list must render identically to no details
+    # at all -- no stray details line should appear either way.
+    assert with_empty_details == without_details_key
+
+
+def test_format_contact_renders_optional_links():
+    rendered = format_contact({
+        "name": "Candidate",
+        "email": "candidate@example.com",
+        "phone": "555-0100",
+        "linkedin": "linkedin.com/in/candidate",
+        "github": "github.com/candidate",
+        "portfolio": "candidate.example.com",
+        "location": "Pune, India",
+    })
+
+    assert "github.com/candidate" in rendered
+    assert "candidate.example.com" in rendered
+
+
+def test_format_projects_renders_multiple_bullets():
+    rendered = format_projects([{
+        "name": "Canonical Project",
+        "bullets": ["Primary analysis", "Supporting validation", "Additional finding"],
+    }])
+
+    assert "Primary analysis" in rendered
+    assert "Supporting validation" not in rendered
+    assert "Additional finding" not in rendered
+
+def test_format_contact_keeps_location_on_contact_line():
+    rendered = format_contact({
+        "name": "Candidate",
+        "email": "candidate@example.com",
+        "phone": "555-0100",
+        "linkedin": "linkedin.com/in/candidate",
+        "location": "Pune, India",
+    })
+
+    assert r"candidate@example.com\enspace $|$ \enspace 555-0100" in rendered
+    assert r"linkedin.com/in/candidate}\enspace $|$ \enspace Pune, India" in rendered
