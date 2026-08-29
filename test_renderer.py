@@ -113,6 +113,38 @@ def test_format_contact_renders_optional_links():
     assert "candidate.example.com" in rendered
 
 
+def test_format_contact_email_is_a_mailto_link():
+    # Regression guard: a prior refactor accidentally rendered the email
+    # as plain text with no mailto: link.
+    rendered = format_contact({
+        "name": "Candidate",
+        "email": "candidate@example.com",
+        "phone": "555-0100",
+        "location": "Pune, India",
+    })
+
+    assert r"\href{mailto:candidate@example.com}{candidate@example.com}" in rendered
+
+
+def test_format_projects_skips_entries_without_a_name_or_bullets():
+    rendered = format_projects([
+        {"name": "", "bullets": ["Should be skipped: no name"]},
+        {"name": "No Bullets Project", "bullets": []},
+        "not a dict",
+        {"name": "Valid Project", "bullets": ["A real description"]},
+    ])
+
+    assert "Should be skipped" not in rendered
+    assert "No Bullets Project" not in rendered
+    assert "Valid Project" in rendered
+    assert "A real description" in rendered
+
+
+def test_format_projects_returns_empty_string_for_no_valid_projects():
+    assert format_projects([]) == ""
+    assert format_projects([{"name": "", "bullets": []}]) == ""
+
+
 def test_format_projects_renders_multiple_bullets():
     rendered = format_projects([{
         "name": "Canonical Project",
@@ -132,5 +164,6 @@ def test_format_contact_keeps_location_on_contact_line():
         "location": "Pune, India",
     })
 
-    assert r"candidate@example.com\enspace $|$ \enspace 555-0100" in rendered
+    assert r"\href{mailto:candidate@example.com}{candidate@example.com}" in rendered
+    assert r"555-0100\enspace $|$ \enspace \href{https://linkedin.com/in/candidate}" in rendered
     assert r"linkedin.com/in/candidate}\enspace $|$ \enspace Pune, India" in rendered

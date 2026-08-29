@@ -157,6 +157,77 @@ def _write_page_overflow_report(
 
 
 # ============================================================
+# ITERATIVE REFINEMENT
+# ============================================================
+
+def _attempt_has_issues(page_count, evidence_flags, ats_score) -> bool:
+    """
+    An attempt is considered acceptable (no retry needed) only if it fits
+    one page, has no unsupported-claim flags, and covers every REQUIRED JD
+    keyword the ATS scorer found evidence for elsewhere in the resume.
+    Missing PREFERRED keywords alone do not trigger a retry.
+    """
+
+    if page_count != 1:
+        return True
+
+    if evidence_flags:
+        return True
+
+    if ats_score is not None and getattr(ats_score, "required_missing", 0):
+        return True
+
+    return False
+
+
+def _build_feedback(page_count, evidence_flags, ats_score) -> str:
+    """
+    Turn one failed attempt's diagnostics into plain-text feedback for the
+    next tailoring attempt's prompt (see llm_tailor._feedback_section).
+    """
+
+    lines = []
+
+    if page_count is not None and page_count != 1:
+        lines.append(
+            f"- The resume was {page_count} page(s) long; it must fit "
+            "exactly one page. Shorten bullets, reduce skill categories, "
+            "or tighten the summary."
+        )
+
+    if evidence_flags:
+        lines.append(
+            "- The following bullets could not be verified against the "
+            "MASTER RESUME and must be rewritten (using only MASTER RESUME "
+            "facts) or removed -- do not invent replacements:"
+        )
+        max_flags_shown = 8
+        for flag in evidence_flags[:max_flags_shown]:
+            reasons = "; ".join(getattr(flag, "reasons", []) or [])
+            lines.append(
+                f'    [{flag.source_name}] "{flag.bullet}" -- {reasons}'
+            )
+        if len(evidence_flags) > max_flags_shown:
+            lines.append(
+                f"    ... and {len(evidence_flags) - max_flags_shown} "
+                "more flagged bullet(s)."
+            )
+
+    if ats_score is not None and getattr(ats_score, "required_missing", 0):
+        lines.append(
+            "- The following REQUIRED job-description keywords are not "
+            "reflected anywhere in the resume. Where genuinely supported "
+            "by the MASTER RESUME, incorporate them naturally; do not "
+            "fabricate experience or skills that aren't in the MASTER "
+            "RESUME just to cover a keyword:"
+        )
+        for keyword in (ats_score.missing_keywords or [])[:10]:
+            lines.append(f"    - {keyword}")
+
+    return "\n".join(lines)
+
+
+# ============================================================
 # LOAD MASTER RESUME
 # ============================================================
 
@@ -211,17 +282,27 @@ def generate_resume(
     role: str = "",
     master_resume_path: Path = None,
     strict_one_page: bool = True,
+    max_iterations: int = None,
 ) -> Path:
 
     """
     Full pipeline:
 
         1. Analyze JD
-        2. Tailor resume
+        2. Tailor resume (may retry, see below)
         3. Render LaTeX
         4. Compile PDF
 
-    If the compiled PDF exceeds one page:
+    Iterative refinement:
+      max_iterations controls how many tailoring attempts are made.
+      Defaults to config.MAX_TAILOR_ITERATIONS (itself defaulting to 1 --
+      the original single-shot behavior). When set above 1, an attempt
+      that overflows one page, has unsupported-claim flags, or is missing
+      REQUIRED JD keywords is fed back to the LLM as specific, factual
+      feedback and retried, up to max_iterations attempts total. The last
+      attempt made is always the one rendered/returned.
+
+    If the final attempt's PDF exceeds one page:
       - The PDF and .tex files are always kept on disk (never discarded).
       - A diagnostic report is written alongside them breaking down bullet/
         section counts so the overflow can be traced and trimmed.
@@ -236,6 +317,11 @@ def generate_resume(
             "Job description cannot be empty."
         )
 
+    if max_iterations is None:
+        max_iterations = config.MAX_TAILOR_ITERATIONS
+
+    max_iterations = max(1, int(max_iterations))
+
     # --------------------------------------------------------
     # Load master resume
     # --------------------------------------------------------
@@ -245,7 +331,7 @@ def generate_resume(
     )
 
     # --------------------------------------------------------
-    # Analyze JD and tailor
+    # Analyze JD (once -- does not depend on tailoring attempt)
     # --------------------------------------------------------
 
     print("[1/4] Analyzing job description...")
@@ -257,32 +343,9 @@ def generate_resume(
     )
     print_analysis(jd_requirements)
 
-    tailored = tailor_resume(
-        master_resume,
-        job_description,
-        jd_requirements
-    )
-
-    ats_score = score_keyword_coverage(
-        tailored,
-        jd_requirements
-    )
-    print_ats_score(ats_score)
-
-    evidence_flags = flag_unsupported_bullets(
-        tailored,
-        master_resume
-    )
-    total_bullets = sum(
-        len(item.get("bullets", []))
-        for section in ("experience", "projects")
-        for item in tailored.get(section, [])
-        if isinstance(item, dict) and isinstance(item.get("bullets", []), list)
-    )
-    print_evidence_check(evidence_flags, total_bullets)
-
     # --------------------------------------------------------
-    # Filename
+    # Filename (fixed across attempts, so each retry overwrites
+    # the same .tex/.pdf rather than littering the output dir)
     # --------------------------------------------------------
 
     timestamp = datetime.now().strftime(
@@ -312,40 +375,103 @@ def generate_resume(
         f"{slug}_{timestamp}"
     )
 
-    # --------------------------------------------------------
-    # LaTeX path
-    # --------------------------------------------------------
-
     tex_output_path = (
         config.OUTPUT_TEX_DIR
         / f"{filename_stem}.tex"
     )
 
-    print(
-        f"[2/4] Rendering LaTeX -> "
-        f"{tex_output_path}"
-    )
-
-    render_latex(
-        tailored,
-        config.RESUME_TEMPLATE_PATH,
-        tex_output_path
-    )
-
     # --------------------------------------------------------
-    # PDF
+    # Tailor (with retry loop)
     # --------------------------------------------------------
 
-    print(
-        "[3/4] Compiling PDF..."
-    )
+    feedback = None
+    tailored = None
+    pdf_path = None
+    page_count = None
 
-    pdf_path = compile_pdf(
-        tex_output_path,
-        config.OUTPUT_PDF_DIR
-    )
+    for attempt in range(1, max_iterations + 1):
 
-    page_count = get_pdf_page_count(pdf_path)
+        if max_iterations > 1:
+            print(f"[2/4] Tailoring resume (attempt {attempt}/{max_iterations})...")
+        else:
+            print("[2/4] Tailoring resume...")
+
+        if feedback:
+            tailored = tailor_resume(
+                master_resume,
+                job_description,
+                jd_requirements,
+                feedback=feedback,
+            )
+        else:
+            tailored = tailor_resume(
+                master_resume,
+                job_description,
+                jd_requirements
+            )
+
+        ats_score = score_keyword_coverage(
+            tailored,
+            jd_requirements
+        )
+        print_ats_score(ats_score)
+
+        evidence_flags = flag_unsupported_bullets(
+            tailored,
+            master_resume
+        )
+        total_bullets = sum(
+            len(item.get("bullets", []))
+            for section in ("experience", "projects")
+            for item in tailored.get(section, [])
+            if isinstance(item, dict) and isinstance(item.get("bullets", []), list)
+        )
+        print_evidence_check(evidence_flags, total_bullets)
+
+        print(
+            f"[3/4] Rendering LaTeX -> "
+            f"{tex_output_path}"
+        )
+
+        render_latex(
+            tailored,
+            config.RESUME_TEMPLATE_PATH,
+            tex_output_path
+        )
+
+        print(
+            "[4/4] Compiling PDF..."
+        )
+
+        pdf_path = compile_pdf(
+            tex_output_path,
+            config.OUTPUT_PDF_DIR
+        )
+
+        page_count = get_pdf_page_count(pdf_path)
+
+        has_issues = _attempt_has_issues(
+            page_count,
+            evidence_flags,
+            ats_score,
+        )
+
+        if not has_issues or attempt >= max_iterations:
+            break
+
+        print(
+            f"Attempt {attempt}/{max_iterations} had issues; "
+            f"retrying with feedback..."
+        )
+        feedback = _build_feedback(
+            page_count,
+            evidence_flags,
+            ats_score,
+        )
+
+    # --------------------------------------------------------
+    # One-page enforcement (applies to the last attempt made)
+    # --------------------------------------------------------
 
     if page_count != 1:
 

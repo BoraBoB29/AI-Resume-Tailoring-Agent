@@ -48,7 +48,9 @@ def format_contact(contact):
     parts = []
 
     if email:
-        parts.append(email)
+        parts.append(
+            rf"\href{{mailto:{email}}}{{{email}}}"
+        )
 
     if phone:
         parts.append(phone)
@@ -366,16 +368,36 @@ def format_projects(projects):
     output = []
 
     for project in projects:
-        name = escape_latex(project.get("name", ""))
-        bullets = project.get("bullets", []) or []
+        if not isinstance(project, dict):
+            continue
+
+        name = str(project.get("name", "")).strip()
+        if not name:
+            continue
+
+        bullets = project.get("bullets", [])
+        if not isinstance(bullets, list):
+            bullets = []
+
+        descriptions = [
+            str(bullet).strip()
+            for bullet in bullets
+            if str(bullet).strip()
+        ]
 
         # Exactly ONE description per project.
         # The first bullet is the complete project description.
-        description = escape_latex(str(bullets[0])) if bullets else ""
+        if not descriptions:
+            continue
+
+        description = descriptions[0]
 
         output.append(
-            rf"\resumeItem{{\textbf{{{name}}} -- {description}}}"
+            rf"\resumeItem{{\textbf{{{escape_latex(name)}}} -- {escape_latex(description)}}}"
         )
+
+    if not output:
+        return ""
 
     return "\n".join(output) + "\n"
 

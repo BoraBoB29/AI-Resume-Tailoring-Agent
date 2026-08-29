@@ -46,6 +46,35 @@ def _experience_bullet_target(company: str) -> int:
     return _DEFAULT_EXPERIENCE_BULLET_TARGET
 
 
+# ============================================================
+# ITERATIVE REFINEMENT FEEDBACK
+#
+# Used by resume_generator.generate_resume() when max_iterations > 1: after
+# a failed attempt (page overflow, unsupported claims, low ATS coverage),
+# a plain-text summary of what to fix is built (see
+# resume_generator._build_feedback) and passed back in here so the next
+# attempt can address it directly, without inventing new content.
+# ============================================================
+
+def _feedback_section(feedback):
+    if not feedback:
+        return ""
+
+    return f"""
+PREVIOUS ATTEMPT FEEDBACK
+============================================================
+
+The previous tailored resume you produced had the issues listed below.
+Revise your output to address every one of them directly. Continue to
+follow every rule above while doing so -- in particular, never invent
+content that is not supported by the MASTER RESUME just to address an
+issue below.
+
+{feedback}
+
+"""
+
+
 class ResumeTailor:
 
     def __init__(self):
@@ -1180,7 +1209,8 @@ class ResumeTailor:
         self,
         master_resume,
         job_description,
-        jd_requirements=None
+        jd_requirements=None,
+        feedback=None
     ):
 
         master_resume_json = json.dumps(
@@ -1575,7 +1605,7 @@ STRUCTURED JOB REQUIREMENTS
 
 {json.dumps([item.model_dump() for item in (jd_requirements or [])], indent=2)}
 
-
+{_feedback_section(feedback)}
 ============================================================
 TASK
 ============================================================
@@ -1924,7 +1954,8 @@ Requirements:
 def tailor_resume(
     master_resume,
     job_description,
-    jd_requirements=None
+    jd_requirements=None,
+    feedback=None
 ):
 
     tailor = ResumeTailor()
@@ -1932,5 +1963,6 @@ def tailor_resume(
     return tailor.tailor(
         master_resume,
         job_description,
-        jd_requirements
+        jd_requirements,
+        feedback
     )

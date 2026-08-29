@@ -1,3 +1,15 @@
+import sys
+
+if "pytest" in sys.modules:
+    import pytest
+
+    pytest.skip(
+        "Manual Mistral model-availability smoke script; run directly "
+        "(`python test_mistral_models.py`) when API access is intended. "
+        "Not run under pytest since it makes real, billed API calls.",
+        allow_module_level=True,
+    )
+
 from mistralai.client import Mistral
 import os
 from dotenv import load_dotenv

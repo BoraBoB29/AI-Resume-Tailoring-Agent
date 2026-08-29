@@ -33,3 +33,6 @@ data/master_resume.yaml
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Editor/agent backup files
+*.backup
