@@ -1,0 +1,21 @@
+target_roles:
+  - Product Manager
+  - Product Analyst
+  - Business Analyst
+  - Operations Analyst
+  - AI Product Manager
+
+preferred_locations:
+  - Pune
+  - Bangalore
+  - Mumbai
+  - Hyderabad
+  - Remote
+
+required_terms:
+  - Python
+  - SQL
+  - AI
+  - automation
+
+minimum_match_score: 50
