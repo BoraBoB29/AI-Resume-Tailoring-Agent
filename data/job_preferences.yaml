@@ -1,0 +1,17 @@
+target_roles:
+  - Product Manager
+  - Product Owner
+  - Technical Product Manager
+  - Product Analyst
+
+preferred_locations:
+  - Pune
+  - Bangalore
+  - Bengaluru
+  - Mumbai
+  - Hyderabad
+  - Remote
+
+required_terms: []
+
+minimum_score: 50
