@@ -6,7 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-    
+
 from src.job_agent import JobAgent
 from src.job_ingestion.adapters.greenhouse import GreenhouseAdapter
 
@@ -40,27 +40,30 @@ def main():
         "--min-score",
         type=float,
         default=50.0,
+        help="Minimum job match score.",
     )
 
     parser.add_argument(
         "--limit",
         type=int,
         default=10,
+        help="Maximum number of jobs to display.",
     )
 
     parser.add_argument(
         "--max-iterations",
         type=int,
         default=None,
+        help="Maximum resume-tailoring iterations.",
     )
 
     args = parser.parse_args()
 
     print("\nDiscovering jobs...")
 
-    adapter = GreenhouseAdapter(
-        board_token=args.board,
-    )
+    # The Greenhouse board is supplied during discovery,
+    # not when constructing the adapter.
+    adapter = GreenhouseAdapter()
 
     agent = JobAgent(adapter)
 
@@ -68,6 +71,7 @@ def main():
         target_roles=args.role,
         preferred_locations=args.location,
         minimum_score=args.min_score,
+        board=args.board,
     )
 
     print(f"\nFound {len(matches)} matching jobs.\n")
