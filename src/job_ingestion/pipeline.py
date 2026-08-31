@@ -1,4 +1,5 @@
-﻿from src.job_matcher import score_job
+﻿from src.job_ingestion.match_result import JobMatch
+from src.job_matcher import score_job
 
 
 def discover_jobs(
@@ -6,6 +7,7 @@ def discover_jobs(
     target_roles=None,
     preferred_locations=None,
     required_terms=None,
+    min_score=0,
     **fetch_kwargs,
 ):
     jobs = adapter.fetch_jobs(**fetch_kwargs)
@@ -20,11 +22,31 @@ def discover_jobs(
             required_terms=required_terms or [],
         )
 
-        results.append((job, match_result))
+        score = getattr(match_result, "score", 0)
+
+        if score < min_score:
+            continue
+
+        results.append(
+            JobMatch(
+                job=job,
+                score=score,
+                matched_terms=getattr(
+                    match_result,
+                    "matched_terms",
+                    [],
+                ),
+                missing_terms=getattr(
+                    match_result,
+                    "missing_terms",
+                    [],
+                ),
+            )
+        )
 
     results.sort(
-        key=lambda item: getattr(item[1], "score", 0),
+        key=lambda result: result.score,
         reverse=True,
     )
 
-    return [job for job, _ in results]
+    return results

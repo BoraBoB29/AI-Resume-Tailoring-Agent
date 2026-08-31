@@ -26,7 +26,7 @@ class FakeAdapter:
         ]
 
 
-def test_discover_jobs_returns_jobs():
+def test_discover_jobs_returns_ranked_results():
     results = discover_jobs(
         adapter=FakeAdapter(),
         target_roles=["Product Manager"],
@@ -34,4 +34,16 @@ def test_discover_jobs_returns_jobs():
     )
 
     assert len(results) >= 1
-    assert results[0].title == "Product Manager"
+    assert results[0].job.title == "Product Manager"
+    assert results[0].score >= 0
+
+
+def test_discover_jobs_respects_min_score():
+    results = discover_jobs(
+        adapter=FakeAdapter(),
+        target_roles=["Product Manager"],
+        preferred_locations=["Pune"],
+        min_score=101,
+    )
+
+    assert results == []
