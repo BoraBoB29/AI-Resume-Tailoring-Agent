@@ -1,0 +1,9 @@
+﻿{
+  "boards": [
+    {
+      "name": "Example Corp",
+      "token": "examplecorpsandbox",
+      "enabled": true
+    }
+  ]
+}
