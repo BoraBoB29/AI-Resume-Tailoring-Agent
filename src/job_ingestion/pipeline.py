@@ -1,13 +1,12 @@
-﻿from src.job_ingestion.match_result import JobMatch
-from src.job_matcher import score_job
+﻿from src.job_matcher import score_job
 
 
-def discover_jobs(
+def discover_matching_jobs(
     adapter,
     target_roles=None,
     preferred_locations=None,
     required_terms=None,
-    min_score=0,
+    minimum_score=50.0,
     **fetch_kwargs,
 ):
     jobs = adapter.fetch_jobs(**fetch_kwargs)
@@ -15,38 +14,52 @@ def discover_jobs(
     results = []
 
     for job in jobs:
-        match_result = score_job(
+        result = score_job(
             job,
             target_roles=target_roles or [],
             preferred_locations=preferred_locations or [],
             required_terms=required_terms or [],
         )
 
-        score = getattr(match_result, "score", 0)
+        if result.score >= minimum_score:
+            results.append(result)
 
-        if score < min_score:
-            continue
-
-        results.append(
-            JobMatch(
-                job=job,
-                score=score,
-                matched_terms=getattr(
-                    match_result,
-                    "matched_terms",
-                    [],
-                ),
-                missing_terms=getattr(
-                    match_result,
-                    "missing_terms",
-                    [],
-                ),
-            )
-        )
-
-    results.sort(
+    return sorted(
+        results,
         key=lambda result: result.score,
         reverse=True,
     )
 
-    return results
+
+def discover_jobs(
+    adapter,
+    target_roles=None,
+    preferred_locations=None,
+    required_terms=None,
+    minimum_score=50.0,
+    min_score=None,
+    **fetch_kwargs,
+):
+    """
+    Discover and rank jobs.
+
+    Returns JobMatchResult objects so callers have access to:
+    - result.job
+    - result.score
+    - result.matched_terms
+    - result.missing_terms
+
+    min_score is supported as a backward-compatible alias.
+    """
+
+    if min_score is not None:
+        minimum_score = min_score
+
+    return discover_matching_jobs(
+        adapter=adapter,
+        target_roles=target_roles,
+        preferred_locations=preferred_locations,
+        required_terms=required_terms,
+        minimum_score=minimum_score,
+        **fetch_kwargs,
+    )
