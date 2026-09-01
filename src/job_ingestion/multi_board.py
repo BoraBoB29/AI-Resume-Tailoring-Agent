@@ -1,4 +1,6 @@
-﻿from src.job_ingestion.board_config import load_greenhouse_boards
+﻿from __future__ import annotations
+
+from src.job_ingestion.board_config import load_greenhouse_boards
 from src.job_ingestion.adapters.greenhouse import GreenhouseAdapter
 from src.job_matcher import score_job
 
@@ -11,19 +13,42 @@ def discover_from_greenhouse_boards(
     config_path="data/greenhouse_boards.json",
 ):
     """
-    Discover and rank jobs across all enabled Greenhouse boards.
+    Discover and rank jobs across multiple Greenhouse boards.
+
+    Invalid/unavailable boards are skipped so that one bad board
+    does not stop discovery from all other boards.
     """
 
     boards = load_greenhouse_boards(config_path)
+
     adapter = GreenhouseAdapter()
 
     results = []
 
     for board_config in boards:
-        token = board_config["token"]
+        board_name = board_config["name"]
+        board_token = board_config["token"]
 
-        jobs = adapter.fetch_jobs(
-            board=token,
+        print(
+            f"Checking Greenhouse board: "
+            f"{board_name} ({board_token})"
+        )
+
+        try:
+            jobs = adapter.fetch_jobs(
+                board=board_token,
+            )
+
+        except Exception as exc:
+            print(
+                f"WARNING: Could not load board "
+                f"'{board_name}' ({board_token}): {exc}"
+            )
+            print("Skipping this board and continuing...\n")
+            continue
+
+        print(
+            f"  Loaded {len(jobs)} jobs from {board_name}."
         )
 
         for job in jobs:

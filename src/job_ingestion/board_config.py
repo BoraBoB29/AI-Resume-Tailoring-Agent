@@ -12,6 +12,18 @@ def load_greenhouse_boards(
 ) -> list[dict]:
     """
     Load enabled Greenhouse boards from configuration.
+
+    Expected JSON format:
+
+    {
+        "boards": [
+            {
+                "name": "Example Corp",
+                "token": "examplecorpsandbox",
+                "enabled": true
+            }
+        ]
+    }
     """
 
     path = Path(config_path)
@@ -21,7 +33,7 @@ def load_greenhouse_boards(
             f"Greenhouse board configuration not found: {path}"
         )
 
-    # utf-8-sig safely handles both normal UTF-8 and Windows UTF-8 BOM files.
+    # utf-8-sig handles both normal UTF-8 and UTF-8 files containing a BOM.
     with path.open("r", encoding="utf-8-sig") as file:
         data = json.load(file)
 
@@ -42,7 +54,9 @@ def load_greenhouse_boards(
         if not board.get("enabled", True):
             continue
 
-        token = str(board.get("token", "")).strip()
+        token = str(
+            board.get("token", board.get("board", ""))
+        ).strip()
 
         if not token:
             continue
