@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import sys
 from pathlib import Path
 
@@ -9,7 +9,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.job_agent import JobAgent
 from src.job_ingestion.adapters.greenhouse import GreenhouseAdapter
-
+from src.job_ingestion.multi_board import discover_from_greenhouse_boards
+from src.job_store import save_matches
 
 def main():
     parser = argparse.ArgumentParser(
@@ -18,8 +19,14 @@ def main():
 
     parser.add_argument(
         "--board",
-        required=True,
-        help="Greenhouse board token.",
+        required=False,
+        help="Single Greenhouse board token.",
+    )
+
+    parser.add_argument(
+        "--all-boards",
+        action="store_true",
+        help="Search all enabled Greenhouse boards in data/greenhouse_boards.json.",
     )
 
     parser.add_argument(
@@ -59,26 +66,42 @@ def main():
 
     args = parser.parse_args()
 
+    # Require either --board or --all-boards.
+    if not args.board and not args.all_boards:
+        parser.error("provide either --board BOARD or --all-boards")
+
+    if args.board and args.all_boards:
+        parser.error("--board and --all-boards cannot be used together")
+
     print("\nDiscovering jobs...")
 
-    # The Greenhouse board is supplied during discovery,
-    # not when constructing the adapter.
-    adapter = GreenhouseAdapter()
+    if args.all_boards:
+        matches = discover_from_greenhouse_boards(
+            target_roles=args.role,
+            preferred_locations=args.location,
+            minimum_score=args.min_score,
+            config_path="data/greenhouse_boards.json",
+        )
+    else:
+        adapter = GreenhouseAdapter()
+        agent = JobAgent(adapter)
 
-    agent = JobAgent(adapter)
-
-    matches = agent.discover(
-        target_roles=args.role,
-        preferred_locations=args.location,
-        minimum_score=args.min_score,
-        board=args.board,
-    )
+        matches = agent.discover(
+            target_roles=args.role,
+            preferred_locations=args.location,
+            minimum_score=args.min_score,
+            board=args.board,
+        )
 
     print(f"\nFound {len(matches)} matching jobs.\n")
 
     if not matches:
         print("No jobs matched your criteria.")
         return
+
+    store_path = save_matches(matches)
+
+    print(f"Saved job matches to: {store_path}")
 
     displayed = matches[:args.limit]
 
@@ -125,6 +148,12 @@ def main():
     print(f"URL:      {job.url}")
     print(f"Score:    {selected.score}")
 
+    if selected.matched_terms:
+        print(f"Matched:  {', '.join(selected.matched_terms)}")
+
+    if selected.missing_terms:
+        print(f"Missing:  {', '.join(selected.missing_terms)}")
+
     confirm = input(
         "\nGenerate tailored resume? [y/N]: "
     ).strip().lower()
@@ -134,6 +163,8 @@ def main():
         return
 
     print("\nGenerating tailored resume...\n")
+
+    agent = JobAgent(GreenhouseAdapter())
 
     pdf_path = agent.generate_resume(
         selected,
