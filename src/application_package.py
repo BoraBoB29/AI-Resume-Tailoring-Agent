@@ -2,104 +2,134 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict
-from datetime import datetime, timezone
 from pathlib import Path
 
+from src.job_ingestion.models import Job
 from src.job_matcher import JobMatchResult
-from src.job_resume_pipeline import generate_resume_for_job
 
 
-DEFAULT_OUTPUT_DIR = Path("output/applications")
-
-
-def _slugify(value: str) -> str:
-    """
-    Convert a company/job title into a safe directory name.
-    """
-
-    value = value.lower().strip()
-
-    value = re.sub(
-        r"[^a-z0-9]+",
-        "_",
-        value,
-    )
-
-    return value.strip("_")
-
-
-def _create_output_directory(
+def create_cover_letter(
     match: JobMatchResult,
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
+    output_dir: str | Path,
 ) -> Path:
+    """
+    Create a cover-letter text file for a matched job.
+
+    Parameters
+    ----------
+    match:
+        JobMatchResult containing the selected job.
+
+    output_dir:
+        Directory where the cover letter should be created.
+
+    Returns
+    -------
+    Path
+        Path to the generated cover-letter file.
+    """
+
+    if not isinstance(match, JobMatchResult):
+        raise TypeError("match must be a JobMatchResult.")
 
     job = match.job
 
-    company_slug = _slugify(
-        job.company
+    if not isinstance(job, Job):
+        raise TypeError("match.job must be a Job instance.")
+
+    if not job.title.strip():
+        raise ValueError("Job has no title.")
+
+    if not job.company.strip():
+        raise ValueError("Job has no company.")
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    filename = (
+        f"{_safe_filename(job.company)}_"
+        f"{_safe_filename(job.title)}_cover_letter.txt"
     )
 
-    role_slug = _slugify(
-        job.title
+    cover_letter_path = output_path / filename
+
+    matched_terms = match.matched_terms or []
+
+    alignment_sentence = ""
+
+    if matched_terms:
+        terms = ", ".join(matched_terms[:5])
+
+        alignment_sentence = (
+            f"\n\nMy background aligns with areas such as {terms}, "
+            "and I am interested in applying that experience to this role."
+        )
+
+    cover_letter = (
+        "Dear Hiring Team,\n\n"
+        f"I am writing to express my interest in the {job.title} "
+        f"position at {job.company}. "
+        "I am excited about the opportunity to contribute to the team "
+        "and apply my skills to the responsibilities of this position."
+        f"{alignment_sentence}\n\n"
+        "I would welcome the opportunity to discuss how my background "
+        "could contribute to your team. Thank you for your consideration."
+        "\n\n"
+        "Best regards,\n"
+        "Candidate\n"
     )
 
-    directory = (
-        Path(output_dir)
-        / company_slug
-        / role_slug
+    cover_letter_path.write_text(
+        cover_letter,
+        encoding="utf-8",
     )
 
-    directory.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    return directory
+    return cover_letter_path
 
 
 def create_application_metadata(
     match: JobMatchResult,
-    output_directory: Path,
+    output_dir: str | Path,
 ) -> Path:
     """
-    Save application metadata for the selected job.
+    Create application metadata JSON for a matched job.
+
+    Returns the path to the generated JSON file.
     """
+
+    if not isinstance(match, JobMatchResult):
+        raise TypeError("match must be a JobMatchResult.")
 
     job = match.job
 
+    if not isinstance(job, Job):
+        raise TypeError("match.job must be a Job instance.")
+
+    if not job.title.strip():
+        raise ValueError("Job has no title.")
+
+    if not job.company.strip():
+        raise ValueError("Job has no company.")
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
     metadata = {
-        "created_at": datetime.now(
-            timezone.utc
-        ).isoformat(),
-
         "status": "READY_TO_APPLY",
-
         "job": {
-            "id": job.job_id,
             "title": job.title,
             "company": job.company,
-            "location": job.location,
-            "url": job.url,
-            "source": job.source,
+            "location": job.location or "",
+            "url": job.url or "",
+            "job_id": job.job_id or "",
         },
-
         "match": {
-            "score": match.score,
-            "matched_terms": match.matched_terms,
-            "missing_terms": match.missing_terms,
-        },
-
-        "files": {
-            "resume": None,
-            "cover_letter": None,
+            "score": float(match.score),
+            "matched_terms": list(match.matched_terms),
+            "missing_terms": list(match.missing_terms),
         },
     }
-
-    metadata_path = (
-        output_directory
-        / "application.json"
-    )
+    metadata_path = output_path / "application_metadata.json"
 
     metadata_path.write_text(
         json.dumps(
@@ -113,135 +143,59 @@ def create_application_metadata(
     return metadata_path
 
 
-def create_cover_letter(
+def create_application_package(
     match: JobMatchResult,
-    output_directory: Path,
-) -> Path:
+    output_dir: str | Path,
+) -> dict[str, Path]:
     """
-    Create a simple evidence-based cover letter.
+    Create the complete application package.
 
-    This version deliberately does not invent experience,
-    achievements, or qualifications.
-    """
-
-    job = match.job
-
-    matched = (
-        ", ".join(match.matched_terms)
-        if match.matched_terms
-        else "the role requirements"
-    )
-
-    content = f"""Dear Hiring Team,
-
-I am writing to express my interest in the {job.title} position at {job.company}.
-
-My background and experience align with several aspects of this opportunity, particularly {matched}. I would welcome the opportunity to bring my experience to your team and contribute to the role's objectives.
-
-I am particularly interested in this position because it offers an opportunity to apply my experience while continuing to grow in a role aligned with my professional background.
-
-Thank you for considering my application. I would welcome the opportunity to discuss my background and suitability for the position.
-
-Best regards,
-Varun Bora
-"""
-
-    path = (
-        output_directory
-        / "cover_letter.txt"
-    )
-
-    path.write_text(
-        content,
-        encoding="utf-8",
-    )
-
-    return path
-
-
-def prepare_application(
-    match: JobMatchResult,
-    max_iterations: int | None = None,
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-) -> dict:
-    """
-    Generate the complete application package.
-
-    Returns paths to the generated files.
+    The package currently contains:
+        - cover letter
+        - application metadata
     """
 
-    if not isinstance(
-        match,
-        JobMatchResult,
-    ):
-        raise TypeError(
-            "match must be a JobMatchResult."
-        )
+    if not isinstance(match, JobMatchResult):
+        raise TypeError("match must be a JobMatchResult.")
 
-    output_directory = (
-        _create_output_directory(
-            match,
-            output_dir,
-        )
-    )
-
-    print(
-        "\nPreparing application package..."
-    )
-
-    print(
-        "\n[1/3] Generating tailored resume..."
-    )
-
-    resume_path = generate_resume_for_job(
-        match.job,
-        max_iterations=max_iterations,
-    )
-
-    print(
-        "\n[2/3] Generating cover letter..."
-    )
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
 
     cover_letter_path = create_cover_letter(
         match,
-        output_directory,
-    )
-
-    print(
-        "\n[3/3] Saving application metadata..."
+        output_path,
     )
 
     metadata_path = create_application_metadata(
         match,
-        output_directory,
-    )
-
-    metadata = json.loads(
-        metadata_path.read_text(
-            encoding="utf-8"
-        )
-    )
-
-    metadata["files"]["resume"] = str(
-        resume_path
-    )
-
-    metadata["files"]["cover_letter"] = str(
-        cover_letter_path
-    )
-
-    metadata_path.write_text(
-        json.dumps(
-            metadata,
-            indent=2,
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+        output_path,
     )
 
     return {
-        "directory": output_directory,
-        "resume": Path(resume_path),
         "cover_letter": cover_letter_path,
         "metadata": metadata_path,
     }
+
+
+def _safe_filename(value: str) -> str:
+    """
+    Convert a value into a safe filename component.
+    """
+
+    value = value.strip()
+
+    value = re.sub(
+        r'[<>:"/\\|?*]',
+        "_",
+        value,
+    )
+
+    value = re.sub(
+        r"\s+",
+        "_",
+        value,
+    )
+
+    value = value.strip("._")
+
+    return value[:100] or "unknown"

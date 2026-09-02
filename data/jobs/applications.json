@@ -1,0 +1,22 @@
+{
+  "applications": [
+    {
+      "job_id": "TEST-001",
+      "title": "Product Manager",
+      "company": "Example Corp",
+      "url": "https://example.com/job/TEST-001",
+      "status": "READY_TO_APPLY",
+      "created_at": "2026-09-01T06:36:18.443077+00:00",
+      "updated_at": "2026-09-01T06:36:31.760671+00:00"
+    },
+    {
+      "job_id": "1768087",
+      "title": "01. Marketing Template",
+      "company": "Example Corp",
+      "url": "https://job-boards.greenhouse.io/examplecorpsandbox/jobs/1768087",
+      "status": "READY_TO_APPLY",
+      "created_at": "2026-09-01T06:40:54.173259+00:00",
+      "updated_at": "2026-09-01T06:40:54.173259+00:00"
+    }
+  ]
+}

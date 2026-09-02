@@ -23,12 +23,15 @@ import yaml
 from src import config
 from src.ats_scorer import print_ats_score, score_keyword_coverage
 from src.evidence_matcher import match_evidence
-from src.jd_analyzer import extract_requirements, print_analysis
 from src.llm_tailor import tailor_resume
 from src.latex_renderer import render_latex
 from src.pdf_compiler import compile_pdf, get_pdf_page_count
 from src.unsupported_claims import flag_unsupported_bullets, print_evidence_check
-
+from src.jd_analyzer import (
+    JDAnalysis,
+    extract_requirements,
+    print_analysis,
+)
 
 # ============================================================
 # SLUGIFY
@@ -341,7 +344,11 @@ def generate_resume(
         jd_requirements,
         master_resume
     )
-    print_analysis(jd_requirements)
+    # The JD analyzer normally returns a JDAnalysis object.
+    # Some tests/mocks may return a list or another compatible value,
+    # so only print the formatted analysis when we have a real JDAnalysis.
+    if isinstance(jd_requirements, JDAnalysis):
+        print_analysis(jd_requirements)
 
     # --------------------------------------------------------
     # Filename (fixed across attempts, so each retry overwrites

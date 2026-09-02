@@ -1,152 +1,182 @@
-"""Deterministically match structured JD requirements to resume evidence."""
+from __future__ import annotations
 
+from dataclasses import dataclass
 import re
-from typing import Iterable, List, Tuple
-
-from src.schema import JDRequirement
 
 
-_STOPWORDS = {
-    "a", "an", "and", "be", "by", "for", "have", "in", "of", "on",
-    "or", "the", "to", "with", "years", "year",
-}
+@dataclass
+class EvidenceMatch:
+    requirement: str
+    matched: bool
+    evidence: list[str]
 
-_SYNONYMS = {
-    "bachelor": {"bachelor", "btech", "b.tech", "engineering", "undergraduate"},
-    "degree": {"degree", "bachelor", "btech", "b.tech", "engineering"},
-    "dashboard": {"dashboard", "dashboards"},
-    "dashboards": {"dashboard", "dashboards"},
-    "python": {"python"},
-    "sql": {"sql"},
-    "powerbi": {"powerbi", "power", "bi"},
-    "power": {"powerbi", "power"},
-    "bi": {"powerbi", "bi"},
-}
+    @property
+    def supported(self) -> bool:
+        return self.matched
 
 
-def _normalize(text: object) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", str(text).casefold()).strip()
+def _normalize(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
-def _tokens(text: object) -> set[str]:
-    return {
-        token
-        for token in _normalize(text).split()
-        if token not in _STOPWORDS
-    }
+def _words(text: str) -> set[str]:
+    return set(_normalize(text).split())
 
 
-def _matches(requirement: str, evidence: str) -> bool:
-    requirement_text = _normalize(requirement)
-    evidence_text = _normalize(evidence)
+def _stem(word: str) -> str:
+    """
+    Very small normalization layer for common word variants.
 
-    if not requirement_text or not evidence_text:
+    Examples:
+        managed -> manage
+        management -> manage
+        stakeholders -> stakeholder
+    """
+
+    word = word.lower()
+
+    suffixes = (
+        "ments",
+        "ment",
+        "ing",
+        "ed",
+        "ies",
+        "es",
+        "s",
+    )
+
+    for suffix in suffixes:
+        if len(word) > len(suffix) + 3 and word.endswith(suffix):
+            word = word[:-len(suffix)]
+            break
+
+    if word.endswith("i"):
+        word = word[:-1] + "y"
+
+    return word
+
+
+def _concept_words(text: str) -> set[str]:
+    return {_stem(word) for word in _words(text)}
+
+
+def _requirement_supported(
+    requirement: str,
+    evidence: str,
+) -> bool:
+
+    requirement_words = _concept_words(requirement)
+    evidence_words = _concept_words(evidence)
+
+    if not requirement_words:
         return False
 
-    if requirement_text in evidence_text:
+    # Exact phrase match.
+    requirement_normalized = _normalize(requirement)
+    evidence_normalized = _normalize(evidence)
+
+    if requirement_normalized in evidence_normalized:
         return True
 
-    requirement_tokens = _tokens(requirement_text)
-    evidence_tokens = _tokens(evidence_text)
-    if not requirement_tokens:
-        return False
+    # Concept-level matching.
+    matched_words = requirement_words.intersection(evidence_words)
 
-    for token in requirement_tokens:
-        alternatives = _SYNONYMS.get(token, {token})
-        if not alternatives.intersection(evidence_tokens):
-            return False
+    # For multi-word requirements, allow the majority of concepts
+    # to match. This handles:
+    #
+    # "Stakeholder Management"
+    # vs
+    # "Managed communication with key stakeholders."
+    #
+    # -> manage + stakeholder
+    if len(requirement_words) == 1:
+        return bool(matched_words)
 
-    return True
-
-
-def _source_entries(master_resume: dict) -> Iterable[Tuple[str, str]]:
-    skills = master_resume.get("skills", {})
-    if isinstance(skills, dict):
-        categories = skills.get("categories", skills)
-        if isinstance(categories, dict):
-            for category, values in categories.items():
-                if isinstance(values, list):
-                    for index, value in enumerate(values):
-                        yield f"skills.{category}[{index}]", str(value)
-
-    experience = master_resume.get("experience", [])
-    if isinstance(experience, list):
-        for experience_item in experience:
-            if not isinstance(experience_item, dict):
-                continue
-            company = str(experience_item.get("company", "")).strip()
-            if not company:
-                continue
-            bullets = experience_item.get("bullets", [])
-            if isinstance(bullets, list):
-                for index, bullet in enumerate(bullets):
-                    yield f"experience.{company}.bullets[{index}]", str(bullet)
-
-    projects = master_resume.get("projects", [])
-    if isinstance(projects, list):
-        for project in projects:
-            if not isinstance(project, dict):
-                continue
-            name = str(project.get("name", "")).strip()
-            if not name:
-                continue
-            tech_stack = project.get("tech_stack", [])
-            if isinstance(tech_stack, list):
-                for index, technology in enumerate(tech_stack):
-                    yield f"projects.{name}.tech_stack[{index}]", str(technology)
-            bullets = project.get("bullets", [])
-            if isinstance(bullets, list):
-                for index, bullet in enumerate(bullets):
-                    yield f"projects.{name}.bullets[{index}]", str(bullet)
-
-    certifications = master_resume.get("certifications", [])
-    if isinstance(certifications, list):
-        for index, certification in enumerate(certifications):
-            if isinstance(certification, dict):
-                value = " ".join(
-                    str(certification.get(field, ""))
-                    for field in ("name", "issuer", "category")
-                )
-            else:
-                value = str(certification)
-            yield f"certifications[{index}]", value
-
-    education = master_resume.get("education", [])
-    if isinstance(education, list):
-        for index, education_item in enumerate(education):
-            if not isinstance(education_item, dict):
-                continue
-            value = " ".join(
-                str(education_item.get(field, ""))
-                for field in ("institution", "degree", "details")
-            )
-            yield f"education[{index}]", value
+    return len(matched_words) >= len(requirement_words) / 2
 
 
 def match_evidence(
-    requirements: Iterable[JDRequirement],
-    master_resume: dict,
-) -> List[JDRequirement]:
-    """Return requirement copies populated with real master-resume references."""
-    if not isinstance(master_resume, dict):
-        master_resume = {}
+    requirements: list[str],
+    evidence: list[str],
+) -> list[EvidenceMatch]:
 
-    entries = list(_source_entries(master_resume))
-    matched = []
+    results: list[EvidenceMatch] = []
 
-    for requirement in requirements or []:
-        if not isinstance(requirement, JDRequirement):
-            requirement = JDRequirement.model_validate(requirement)
-
-        references = [
-            reference
-            for reference, value in entries
-            if _matches(requirement.requirement, value)
+    for requirement in requirements:
+        matched_evidence = [
+            item
+            for item in evidence
+            if _requirement_supported(requirement, item)
         ]
-        matched.append(
-            requirement.model_copy(
-                update={"supporting_evidence": list(dict.fromkeys(references))}
+
+        results.append(
+            EvidenceMatch(
+                requirement=requirement,
+                matched=bool(matched_evidence),
+                evidence=matched_evidence,
             )
         )
 
-    return matched
+    return results
+
+
+def find_evidence(
+    requirement: str,
+    evidence: list[str],
+) -> list[str]:
+    """Return evidence statements supporting a requirement."""
+
+    return [
+        item
+        for item in evidence
+        if _requirement_supported(requirement, item)
+    ]
+
+
+def supported_requirements(
+    requirements: list[str],
+    evidence: list[str],
+) -> list[str]:
+    """Return requirements supported by the supplied evidence."""
+
+    return [
+        result.requirement
+        for result in match_evidence(requirements, evidence)
+        if result.supported
+    ]
+
+
+def match_requirements(
+    requirements,
+    resume_text: str,
+) -> list[EvidenceMatch]:
+    """
+    Match JD requirements against resume text.
+
+    Accepts requirements as strings or requirement objects
+    containing a `text` attribute.
+    """
+
+    evidence = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", resume_text)
+        if sentence.strip()
+    ]
+
+    normalized_requirements = []
+
+    for requirement in requirements:
+        if isinstance(requirement, str):
+            normalized_requirements.append(requirement)
+        elif hasattr(requirement, "text"):
+            normalized_requirements.append(requirement.text)
+        else:
+            normalized_requirements.append(str(requirement))
+
+    return match_evidence(
+        normalized_requirements,
+        evidence,
+    )

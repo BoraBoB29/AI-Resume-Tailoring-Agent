@@ -1,179 +1,561 @@
-"""Deterministic ATS keyword coverage scoring."""
+from __future__ import annotations
 
-import re
-from typing import Iterable, List
-
-from pydantic import BaseModel, Field
-
-from src.schema import JDRequirement
+from dataclasses import dataclass, field
 
 
-class ATSScore(BaseModel):
-    matched_keywords: List[str] = Field(default_factory=list)
-    missing_keywords: List[str] = Field(default_factory=list)
-    coverage_pct: float = 0.0
-    required_matched: int = 0
+@dataclass
+class ATSScore:
+    """
+    Represents ATS keyword/evidence scoring.
+
+    Score fields are percentages from 0 to 100.
+    Coverage fields are normalized values from 0 to 1.
+    """
+
+    required_score: float = 100.0
+    preferred_score: float = 100.0
+    overall_score: float = 100.0
+
+    matched: list[str] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
+
+    # Evidence-match compatibility fields
+    matched_required: list = field(default_factory=list)
+    missing_required: list[str] = field(default_factory=list)
+
+    matched_preferred: list = field(default_factory=list)
+    missing_preferred: list[str] = field(default_factory=list)
+
+    # Legacy counters
     required_missing: int = 0
-    preferred_matched: int = 0
     preferred_missing: int = 0
-    implicit_matched: List[str] = Field(default_factory=list)
+
+    # Legacy keyword list
+    missing_keywords: list[str] = field(default_factory=list)
+
+    # Normalized coverage: 0.0 - 1.0
+    required_coverage: float = 1.0
+    preferred_coverage: float = 1.0
+    overall_coverage: float = 1.0
+
+    # Counters
+    required_total: int = 0
+    required_matched: int = 0
+    preferred_total: int = 0
+    preferred_matched: int = 0
+
+    def __post_init__(self) -> None:
+        """
+        Keep compatibility fields synchronized.
+        """
+
+        # If coverage was explicitly left at its default,
+        # derive it from the percentage score.
+        if (
+            self.required_coverage == 1.0
+            and self.required_score != 100.0
+        ):
+            self.required_coverage = (
+                self.required_score / 100.0
+            )
+
+        if (
+            self.preferred_coverage == 1.0
+            and self.preferred_score != 100.0
+        ):
+            self.preferred_coverage = (
+                self.preferred_score / 100.0
+            )
+
+        if (
+            self.overall_coverage == 1.0
+            and self.overall_score != 100.0
+        ):
+            self.overall_coverage = (
+                self.overall_score / 100.0
+            )
+
+        # Keep missing lists synchronized.
+        if not self.missing_required and self.missing:
+            self.missing_required = list(self.missing)
+
+        if not self.missing and self.missing_required:
+            self.missing = list(self.missing_required)
+
+        # Keep preferred missing list synchronized.
+        if (
+            not self.missing_preferred
+            and self.preferred_missing
+        ):
+            self.missing_preferred = list(
+                self.missing_preferred
+            )
+
+        # Keep legacy counters synchronized.
+        if self.required_missing == 0:
+            self.required_missing = len(
+                self.missing_required
+            )
+
+        if self.preferred_missing == 0:
+            self.preferred_missing = len(
+                self.missing_preferred
+            )
+
+        # Keep matched counters sensible.
+        if self.required_matched == 0 and self.required_total == 0:
+            self.required_matched = len(
+                self.matched_required
+            )
+
+        if self.preferred_matched == 0 and self.preferred_total == 0:
+            self.preferred_matched = len(
+                self.matched_preferred
+            )
+
+        # Legacy missing keyword list.
+        if not self.missing_keywords and self.missing:
+            self.missing_keywords = list(self.missing)
 
 
-def _resume_text(tailored_resume) -> str:
-    """Build searchable text from resume fields, without JSON formatting."""
-    if hasattr(tailored_resume, "model_dump"):
-        tailored_resume = tailored_resume.model_dump()
-    if not isinstance(tailored_resume, dict):
-        return ""
+def _coverage(
+    keywords: list[str],
+    resume_text: str,
+) -> tuple[float, list[str], list[str]]:
+    """
+    Calculate keyword coverage.
 
-    values = []
-    values.append(tailored_resume.get("summary", ""))
+    Matching is case-insensitive substring matching.
+    Returns:
+        score,
+        matched keywords,
+        missing keywords
+    """
 
-    skills = tailored_resume.get("skills", {})
-    if isinstance(skills, dict):
-        categories = skills.get("categories", skills)
-        if isinstance(categories, dict):
-            for category, items in categories.items():
-                values.append(category)
-                if isinstance(items, list):
-                    values.extend(items)
+    if not isinstance(resume_text, str):
+        raise TypeError(
+            "resume_text must be a string."
+        )
 
-    for section_name in ("experience", "projects", "education"):
-        section = tailored_resume.get(section_name, [])
-        if not isinstance(section, list):
+    resume_lower = resume_text.lower()
+
+    if not keywords:
+        return 100.0, [], []
+
+    matched: list[str] = []
+    missing: list[str] = []
+
+    for keyword in keywords:
+        keyword = str(keyword).strip()
+
+        if not keyword:
             continue
-        for item in section:
-            if not isinstance(item, dict):
-                continue
-            for field in ("name", "company", "title", "degree", "institution"):
-                values.append(item.get(field, ""))
-            for field in ("bullets", "details", "tech_stack"):
-                field_values = item.get(field, [])
-                if isinstance(field_values, list):
-                    values.extend(field_values)
-            values.append(item.get("description", ""))
 
-    certifications = tailored_resume.get("certifications", [])
-    if isinstance(certifications, list):
-        for certification in certifications:
-            if isinstance(certification, dict):
-                values.extend(
-                    certification.get(field, "")
-                    for field in ("name", "issuer", "category")
-                )
-            else:
-                values.append(certification)
+        if keyword.lower() in resume_lower:
+            matched.append(keyword)
+        else:
+            missing.append(keyword)
 
-    return " ".join(str(value) for value in values if value is not None)
+    total = len(matched) + len(missing)
 
+    if total == 0:
+        return 100.0, matched, missing
 
-def _normalize(text: object) -> str:
-    normalized = re.sub(r"[^a-z0-9\s-]+", " ", str(text).casefold())
-    return re.sub(r"\s+", " ", normalized).strip()
+    score = (
+        len(matched) / total
+    ) * 100.0
 
-
-def _keyword_matches(requirement: str, resume_text: str) -> bool:
-    requirement_normalized = _normalize(requirement)
-    resume_normalized = _normalize(resume_text)
-    if not requirement_normalized:
-        return False
-    if re.search(
-        rf"(?<![a-z0-9-]){re.escape(requirement_normalized)}(?![a-z0-9-])",
-        resume_normalized,
-    ):
-        return True
-
-    aliases = {"power bi": "powerbi", "powerbi": "power bi"}
-    alias = aliases.get(requirement_normalized)
-    return bool(alias and re.search(
-        rf"(?<![a-z0-9-]){re.escape(alias)}(?![a-z0-9-])",
-        resume_normalized,
-    ))
+    return score, matched, missing
 
 
 def score_keyword_coverage(
-    tailored_resume,
-    requirements: Iterable[JDRequirement],
+    resume_text: str,
+    required_keywords: list[str] | None = None,
+    preferred_keywords: list[str] | None = None,
 ) -> ATSScore:
-    """Score required and preferred requirement coverage in a resume."""
-    resume_text = _resume_text(tailored_resume)
-    matched = []
-    missing = []
-    implicit_matched = []
-    required_matched = required_missing = 0
-    preferred_matched = preferred_missing = 0
-    seen_requirements = set()
+    """
+    Score resume coverage against required and preferred keywords.
+    """
 
-    for requirement in requirements or []:
-        if not isinstance(requirement, JDRequirement):
-            requirement = JDRequirement.model_validate(requirement)
-        name = requirement.requirement.strip()
-        if not name:
-            continue
-        requirement_key = (name.casefold(), requirement.evidence_level)
-        if requirement_key in seen_requirements:
-            continue
-        seen_requirements.add(requirement_key)
-        is_match = _keyword_matches(name, resume_text)
+    if not isinstance(resume_text, str):
+        raise TypeError(
+            "resume_text must be a string."
+        )
 
-        if requirement.evidence_level == "implicit":
-            if is_match:
-                implicit_matched.append(name)
-            continue
+    required_keywords = (
+        required_keywords or []
+    )
 
-        if is_match:
-            matched.append(name)
-            if requirement.evidence_level == "required":
-                required_matched += 1
-            else:
-                preferred_matched += 1
-        else:
-            missing.append(name)
-            if requirement.evidence_level == "required":
-                required_missing += 1
-            else:
-                preferred_missing += 1
+    preferred_keywords = (
+        preferred_keywords or []
+    )
 
-    scored_total = required_matched + required_missing + preferred_matched + preferred_missing
-    coverage_pct = (
-        round((required_matched + preferred_matched) * 100 / scored_total, 2)
-        if scored_total
-        else 0.0
+    (
+        required_score,
+        required_matched,
+        missing_required,
+    ) = _coverage(
+        required_keywords,
+        resume_text,
+    )
+
+    (
+        preferred_score,
+        preferred_matched,
+        missing_preferred,
+    ) = _coverage(
+        preferred_keywords,
+        resume_text,
+    )
+
+    if required_keywords and preferred_keywords:
+        overall_score = (
+            required_score +
+            preferred_score
+        ) / 2.0
+
+    elif required_keywords:
+        overall_score = required_score
+
+    elif preferred_keywords:
+        overall_score = preferred_score
+
+    else:
+        overall_score = 100.0
+
+    matched = (
+        required_matched +
+        preferred_matched
+    )
+
+    missing = (
+        missing_required +
+        missing_preferred
     )
 
     return ATSScore(
-        matched_keywords=list(dict.fromkeys(matched)),
-        missing_keywords=list(dict.fromkeys(missing)),
-        coverage_pct=coverage_pct,
-        required_matched=required_matched,
-        required_missing=required_missing,
-        preferred_matched=preferred_matched,
-        preferred_missing=preferred_missing,
-        implicit_matched=list(dict.fromkeys(implicit_matched)),
+        required_score=required_score,
+        preferred_score=preferred_score,
+        overall_score=overall_score,
+
+        matched=matched,
+        missing=missing,
+
+        matched_required=required_matched,
+        missing_required=missing_required,
+
+        matched_preferred=preferred_matched,
+        missing_preferred=missing_preferred,
+
+        required_missing=len(
+            missing_required
+        ),
+        preferred_missing=len(
+            missing_preferred
+        ),
+
+        missing_keywords=missing,
+
+        required_coverage=(
+            required_score / 100.0
+        ),
+        preferred_coverage=(
+            preferred_score / 100.0
+        ),
+        overall_coverage=(
+            overall_score / 100.0
+        ),
+
+        required_total=len(
+            required_keywords
+        ),
+        required_matched=len(
+            required_matched
+        ),
+
+        preferred_total=len(
+            preferred_keywords
+        ),
+        preferred_matched=len(
+            preferred_matched
+        ),
     )
 
 
-def print_ats_score(score: ATSScore) -> None:
-    """Print a concise ATS coverage report."""
-    required_total = score.required_matched + score.required_missing
-    preferred_total = score.preferred_matched + score.preferred_missing
-    required_pct = (
-        round(score.required_matched * 100 / required_total, 2)
-        if required_total else 0.0
-    )
-    preferred_pct = (
-        round(score.preferred_matched * 100 / preferred_total, 2)
-        if preferred_total else 0.0
+def calculate_ats_score(
+    required_matches=None,
+    preferred_matches=None,
+) -> ATSScore:
+    """
+    Calculate ATS score from EvidenceMatch objects.
+
+    Supports both:
+        .supported
+    and:
+        .matched
+    """
+
+    required_matches = (
+        required_matches or []
     )
 
-    print("========== ATS SCORE ==========")
-    print(f"Required coverage: {score.required_matched}/{required_total} ({required_pct}%)")
-    print(f"Preferred coverage: {score.preferred_matched}/{preferred_total} ({preferred_pct}%)")
-    print(f"Overall coverage: {score.coverage_pct}%")
+    preferred_matches = (
+        preferred_matches or []
+    )
+
+    def is_supported(match) -> bool:
+        if hasattr(match, "supported"):
+            return bool(match.supported)
+
+        if hasattr(match, "matched"):
+            return bool(match.matched)
+
+        return False
+
+    # -----------------------------
+    # Required requirements
+    # -----------------------------
+
+    required_matched_objects = [
+        match
+        for match in required_matches
+        if is_supported(match)
+    ]
+
+    required_missing = [
+        getattr(
+            match,
+            "requirement",
+            str(match),
+        )
+        for match in required_matches
+        if not is_supported(match)
+    ]
+
+    # -----------------------------
+    # Preferred requirements
+    # -----------------------------
+
+    preferred_matched_objects = [
+        match
+        for match in preferred_matches
+        if is_supported(match)
+    ]
+
+    preferred_missing = [
+        getattr(
+            match,
+            "requirement",
+            str(match),
+        )
+        for match in preferred_matches
+        if not is_supported(match)
+    ]
+
+    # -----------------------------
+    # Counts
+    # -----------------------------
+
+    required_total = len(
+        required_matches
+    )
+
+    preferred_total = len(
+        preferred_matches
+    )
+
+    required_matched_count = len(
+        required_matched_objects
+    )
+
+    preferred_matched_count = len(
+        preferred_matched_objects
+    )
+
+    # -----------------------------
+    # Scores
+    # -----------------------------
+
+    if required_total:
+        required_score = (
+            required_matched_count /
+            required_total
+        ) * 100.0
+    else:
+        required_score = 100.0
+
+    if preferred_total:
+        preferred_score = (
+            preferred_matched_count /
+            preferred_total
+        ) * 100.0
+    else:
+        preferred_score = 100.0
+
+    if required_total and preferred_total:
+        overall_score = (
+            required_score +
+            preferred_score
+        ) / 2.0
+
+    elif required_total:
+        overall_score = required_score
+
+    elif preferred_total:
+        overall_score = preferred_score
+
+    else:
+        overall_score = 100.0
+
+    # -----------------------------
+    # Human-readable matched values
+    # -----------------------------
+
+    matched = [
+        getattr(
+            match,
+            "requirement",
+            str(match),
+        )
+        for match in (
+            required_matched_objects +
+            preferred_matched_objects
+        )
+    ]
+
+    missing = (
+        required_missing +
+        preferred_missing
+    )
+
+    # -----------------------------
+    # Return
+    # -----------------------------
+
+    return ATSScore(
+        required_score=required_score,
+        preferred_score=preferred_score,
+        overall_score=overall_score,
+
+        matched=matched,
+        missing=missing,
+
+        matched_required=[
+            getattr(
+                match,
+                "requirement",
+                str(match),
+            )
+            for match in required_matched_objects
+        ],
+
+        missing_required=required_missing,
+
+        matched_preferred=[
+            getattr(
+                match,
+                "requirement",
+                str(match),
+            )
+            for match in preferred_matched_objects
+        ],
+
+        missing_preferred=preferred_missing,
+
+        required_missing=len(
+            required_missing
+        ),
+
+        preferred_missing=len(
+            preferred_missing
+        ),
+
+        missing_keywords=missing,
+
+        required_coverage=(
+            required_score / 100.0
+        ),
+
+        preferred_coverage=(
+            preferred_score / 100.0
+        ),
+
+        overall_coverage=(
+            overall_score / 100.0
+        ),
+
+        required_total=required_total,
+
+        required_matched=(
+            required_matched_count
+        ),
+
+        preferred_total=preferred_total,
+
+        preferred_matched=(
+            preferred_matched_count
+        ),
+    )
+
+
+def score_resume(
+    resume_text: str,
+    required_keywords: list[str] | None = None,
+    preferred_keywords: list[str] | None = None,
+) -> ATSScore:
+    """
+    Compatibility alias for score_keyword_coverage.
+    """
+
+    return score_keyword_coverage(
+        resume_text=resume_text,
+        required_keywords=required_keywords,
+        preferred_keywords=preferred_keywords,
+    )
+
+
+def print_ats_score(
+    score: ATSScore,
+) -> None:
+    """
+    Print ATS score in a human-readable format.
+    """
+
+    if not isinstance(score, ATSScore):
+        raise TypeError(
+            "score must be an ATSScore."
+        )
+
+    print("ATS SCORE")
+    print("=========")
+
+    print(
+        f"Required Score: "
+        f"{score.required_score:.2f}%"
+    )
+
+    print(
+        f"Preferred Score: "
+        f"{score.preferred_score:.2f}%"
+    )
+
+    print(
+        f"Overall Score: "
+        f"{score.overall_score:.2f}%"
+    )
+
     print("Matched:")
-    for keyword in score.matched_keywords:
-        print(f"- {keyword}")
+
+    if score.matched:
+        for item in score.matched:
+            print(f"  - {item}")
+    else:
+        print("  - None")
+
     print("Missing:")
-    for keyword in score.missing_keywords:
-        print(f"- {keyword}")
-    print("================================")
+
+    if score.missing:
+        for item in score.missing:
+            print(f"  - {item}")
+    else:
+        print("  - None")
