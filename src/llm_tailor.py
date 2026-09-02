@@ -74,6 +74,53 @@ issue below.
 
 """
 
+def _serialize_requirement(item):
+    """Recursively convert objects into JSON-serializable values."""
+    from dataclasses import asdict, is_dataclass
+
+    if item is None:
+        return None
+
+    # Primitive JSON-safe values
+    if isinstance(item, (str, int, float, bool)):
+        return item
+
+    # Lists / tuples / sets
+    if isinstance(item, (list, tuple, set)):
+        return [
+            _serialize_requirement(value)
+            for value in item
+        ]
+
+    # Dictionaries
+    if isinstance(item, dict):
+        return {
+            str(key): _serialize_requirement(value)
+            for key, value in item.items()
+        }
+
+    # Pydantic v2
+    if hasattr(item, "model_dump"):
+        return _serialize_requirement(item.model_dump())
+
+    # Pydantic v1
+    if hasattr(item, "dict") and callable(item.dict):
+        return _serialize_requirement(item.dict())
+
+    # Dataclasses
+    if is_dataclass(item):
+        return _serialize_requirement(asdict(item))
+
+    # Normal Python objects
+    if hasattr(item, "__dict__"):
+        return {
+            key: _serialize_requirement(value)
+            for key, value in vars(item).items()
+            if not key.startswith("_")
+        }
+
+    # Final fallback
+    return str(item)
 
 class ResumeTailor:
 
@@ -1603,7 +1650,13 @@ JOB DESCRIPTION
 STRUCTURED JOB REQUIREMENTS
 ============================================================
 
-{json.dumps([item.model_dump() for item in (jd_requirements or [])], indent=2)}
+{json.dumps(
+    [
+        _serialize_requirement(item)
+        for item in (jd_requirements or [])
+    ],
+    indent=2,
+)}
 
 {_feedback_section(feedback)}
 ============================================================

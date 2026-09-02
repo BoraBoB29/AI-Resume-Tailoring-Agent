@@ -15,11 +15,16 @@ class EvidenceMatch:
         return self.matched
 
 
-def _normalize(text: str) -> str:
+def _normalize(text):
+    """Normalize either a requirement object or plain text."""
+    if hasattr(text, "requirement"):
+        text = text.requirement
+
+    if not isinstance(text, str):
+        text = str(text)
+
     text = text.lower()
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    return " ".join(text.split())
 
 
 def _words(text: str) -> set[str]:
@@ -63,37 +68,19 @@ def _concept_words(text: str) -> set[str]:
     return {_stem(word) for word in _words(text)}
 
 
-def _requirement_supported(
-    requirement: str,
-    evidence: str,
-) -> bool:
+def _requirement_supported(requirement, evidence):
+    """Check whether evidence supports a JD requirement."""
+    
+    if hasattr(requirement, "requirement"):
+        requirement = requirement.requirement
+
+    if hasattr(evidence, "text"):
+        evidence = evidence.text
 
     requirement_words = _concept_words(requirement)
     evidence_words = _concept_words(evidence)
 
-    if not requirement_words:
-        return False
-
-    # Exact phrase match.
-    requirement_normalized = _normalize(requirement)
-    evidence_normalized = _normalize(evidence)
-
-    if requirement_normalized in evidence_normalized:
-        return True
-
-    # Concept-level matching.
-    matched_words = requirement_words.intersection(evidence_words)
-
-    # For multi-word requirements, allow the majority of concepts
-    # to match. This handles:
-    #
-    # "Stakeholder Management"
-    # vs
-    # "Managed communication with key stakeholders."
-    #
-    # -> manage + stakeholder
-    if len(requirement_words) == 1:
-        return bool(matched_words)
+    return bool(requirement_words & evidence_words)
 
     return len(matched_words) >= len(requirement_words) / 2
 

@@ -1,22 +1,9 @@
-"""
-Phase-1 resume generation pipeline.
+from __future__ import annotations
 
-JOB DESCRIPTION
-        ↓
-Mistral JD-aware tailoring
-        ↓
-Protected master resume facts
-        ↓
-Validated tailored resume
-        ↓
-LaTeX
-        ↓
-PDF
-"""
-
-import re
-from datetime import datetime
 from pathlib import Path
+from datetime import datetime
+import json
+import re
 
 import yaml
 
@@ -33,23 +20,162 @@ from src.jd_analyzer import (
     print_analysis,
 )
 
+
 # ============================================================
 # SLUGIFY
 # ============================================================
 
-def _slugify(
-    text: str
-) -> str:
-
+def _slugify(text: str) -> str:
     text = re.sub(
         r"[^a-zA-Z0-9]+",
         "_",
-        text.strip()
+        text.strip(),
     ).strip("_")
 
-    return (
-        text.lower()
-        or "role"
+    return text.lower() or "role"
+
+
+# ============================================================
+# REQUIREMENT HELPERS
+# ============================================================
+
+def _requirement_text(item) -> str:
+    """
+    Safely extract the plain-text requirement from any of the
+    requirement representations used by the pipeline.
+
+    Supported forms include:
+      - plain strings
+      - JDRequirement objects
+      - EvidenceMatch objects containing JDRequirement
+      - dictionaries
+      - Pydantic models
+      - generic objects
+    """
+
+    if item is None:
+        return ""
+
+    # Plain string
+    if isinstance(item, str):
+        return item.strip()
+
+    # EvidenceMatch-like object:
+    # EvidenceMatch.requirement may itself be a JDRequirement.
+    if hasattr(item, "requirement"):
+        value = getattr(item, "requirement")
+
+        if value is not item:
+            extracted = _requirement_text(value)
+            if extracted:
+                return extracted
+
+    # Dictionary representation
+    if isinstance(item, dict):
+        if "requirement" in item:
+            return _requirement_text(item["requirement"])
+
+        if "text" in item:
+            return str(item["text"]).strip()
+
+        if "name" in item:
+            return str(item["name"]).strip()
+
+        return str(item).strip()
+
+    # Pydantic model
+    if hasattr(item, "model_dump") and callable(item.model_dump):
+        try:
+            return _requirement_text(item.model_dump())
+        except Exception:
+            pass
+
+    # Pydantic v1
+    if hasattr(item, "dict") and callable(item.dict):
+        try:
+            return _requirement_text(item.dict())
+        except Exception:
+            pass
+
+    # Generic Python object
+    if hasattr(item, "__dict__"):
+        data = vars(item)
+
+        if "requirement" in data:
+            return _requirement_text(data["requirement"])
+
+        if "text" in data:
+            return str(data["text"]).strip()
+
+    return str(item).strip()
+
+
+def _serialize_for_json(value):
+    """
+    Convert arbitrary pipeline objects into JSON-serializable values.
+
+    This is intentionally local to resume_generator because the
+    tailoring pipeline can return dictionaries containing objects
+    that are not directly JSON serializable.
+    """
+
+    if value is None:
+        return None
+
+    if isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, dict):
+        return {
+            str(key): _serialize_for_json(item)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, (list, tuple, set)):
+        return [
+            _serialize_for_json(item)
+            for item in value
+        ]
+
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        try:
+            return _serialize_for_json(value.model_dump())
+        except Exception:
+            pass
+
+    if hasattr(value, "dict") and callable(value.dict):
+        try:
+            return _serialize_for_json(value.dict())
+        except Exception:
+            pass
+
+    if hasattr(value, "__dict__"):
+        return {
+            str(key): _serialize_for_json(item)
+            for key, item in vars(value).items()
+            if not key.startswith("_")
+        }
+
+    return str(value)
+
+
+def _tailored_resume_text(tailored) -> str:
+    """
+    Convert the structured tailored resume into searchable text
+    for ATS keyword scoring.
+
+    ATS scoring requires a string, while the tailoring pipeline
+    normally returns a structured dictionary.
+    """
+
+    if isinstance(tailored, str):
+        return tailored
+
+    serialized = _serialize_for_json(tailored)
+
+    return json.dumps(
+        serialized,
+        ensure_ascii=False,
     )
 
 
@@ -59,8 +185,8 @@ def _slugify(
 
 def _content_breakdown(tailored: dict) -> str:
     """
-    Build a human-readable breakdown of section sizes, so a page-overflow
-    can be diagnosed (and trimmed) without re-running the LLM.
+    Build a human-readable breakdown of section sizes, so a
+    page-overflow can be diagnosed without re-running the LLM.
     """
 
     if not isinstance(tailored, dict):
@@ -68,52 +194,108 @@ def _content_breakdown(tailored: dict) -> str:
 
     lines = []
 
-    summary = str(tailored.get("summary", "") or "")
+    summary = str(
+        tailored.get("summary", "") or ""
+    )
+
     lines.append(
         f"Summary: {len(summary.split())} words"
     )
 
     education = tailored.get("education", [])
+
     if isinstance(education, list):
-        lines.append(f"Education entries: {len(education)}")
+        lines.append(
+            f"Education entries: {len(education)}"
+        )
 
     skills = tailored.get("skills", {})
+
     categories = (
         skills.get("categories", {})
         if isinstance(skills, dict)
         else {}
     )
+
     if isinstance(categories, dict):
-        lines.append(f"Skill categories: {len(categories)}")
+        lines.append(
+            f"Skill categories: {len(categories)}"
+        )
+
         for name, values in categories.items():
-            count = len(values) if isinstance(values, list) else 0
-            lines.append(f"  - {name}: {count} skills")
+            count = (
+                len(values)
+                if isinstance(values, list)
+                else 0
+            )
+
+            lines.append(
+                f"  - {name}: {count} skills"
+            )
 
     experience = tailored.get("experience", [])
+
     if isinstance(experience, list):
         lines.append("Experience:")
+
         for item in experience:
             if not isinstance(item, dict):
                 continue
+
             bullets = item.get("bullets", [])
-            bullet_count = len(bullets) if isinstance(bullets, list) else 0
-            company = item.get("company", "(unknown)")
-            lines.append(f"  - {company}: {bullet_count} bullets")
+
+            bullet_count = (
+                len(bullets)
+                if isinstance(bullets, list)
+                else 0
+            )
+
+            company = item.get(
+                "company",
+                "(unknown)",
+            )
+
+            lines.append(
+                f"  - {company}: {bullet_count} bullets"
+            )
 
     projects = tailored.get("projects", [])
+
     if isinstance(projects, list):
-        lines.append(f"Projects: {len(projects)}")
+        lines.append(
+            f"Projects: {len(projects)}"
+        )
+
         for item in projects:
             if not isinstance(item, dict):
                 continue
-            bullets = item.get("bullets", [])
-            bullet_count = len(bullets) if isinstance(bullets, list) else 0
-            name = item.get("name", "(unknown)")
-            lines.append(f"  - {name}: {bullet_count} bullets computed (only bullet 1 is rendered)")
 
-    certifications = tailored.get("certifications", [])
+            bullets = item.get("bullets", [])
+
+            bullet_count = (
+                len(bullets)
+                if isinstance(bullets, list)
+                else 0
+            )
+
+            name = item.get(
+                "name",
+                "(unknown)",
+            )
+
+            lines.append(
+                f"  - {name}: {bullet_count} bullets"
+            )
+
+    certifications = tailored.get(
+        "certifications",
+        [],
+    )
+
     if isinstance(certifications, list):
-        lines.append(f"Certifications: {len(certifications)}")
+        lines.append(
+            f"Certifications: {len(certifications)}"
+        )
 
     return "\n".join(lines) + "\n"
 
@@ -125,12 +307,13 @@ def _write_page_overflow_report(
     page_count: int,
 ) -> Path:
     """
-    Save a diagnostic report next to the generated PDF/tex so an overflow
-    can be inspected and trimmed, instead of discarding the whole run.
+    Save a diagnostic report next to the generated PDF/tex so
+    overflow can be inspected and trimmed.
     """
 
     report_path = pdf_path.with_name(
-        pdf_path.stem + "_page_overflow_report.txt"
+        pdf_path.stem
+        + "_page_overflow_report.txt"
     )
 
     report_lines = [
@@ -145,10 +328,10 @@ def _write_page_overflow_report(
         _content_breakdown(tailored),
         "Suggested next steps:",
         "----------------------",
-        "- Trim the longest experience/project bullets (see counts above).",
+        "- Trim the longest experience/project bullets.",
         "- Reduce skill categories/items if several are only loosely relevant.",
         "- Shorten the summary if it is near or above the 75-word target.",
-        "- Re-run generation; the PDF above reflects the current (overflowing) content.",
+        "- Re-run generation; the PDF above reflects the current content.",
     ]
 
     report_path.write_text(
@@ -163,12 +346,16 @@ def _write_page_overflow_report(
 # ITERATIVE REFINEMENT
 # ============================================================
 
-def _attempt_has_issues(page_count, evidence_flags, ats_score) -> bool:
+def _attempt_has_issues(
+    page_count,
+    evidence_flags,
+    ats_score,
+) -> bool:
     """
-    An attempt is considered acceptable (no retry needed) only if it fits
-    one page, has no unsupported-claim flags, and covers every REQUIRED JD
-    keyword the ATS scorer found evidence for elsewhere in the resume.
-    Missing PREFERRED keywords alone do not trigger a retry.
+    An attempt is acceptable only if it:
+      - fits on one page
+      - has no unsupported-claim flags
+      - has no missing required keywords
     """
 
     if page_count != 1:
@@ -177,55 +364,92 @@ def _attempt_has_issues(page_count, evidence_flags, ats_score) -> bool:
     if evidence_flags:
         return True
 
-    if ats_score is not None and getattr(ats_score, "required_missing", 0):
+    if (
+        ats_score is not None
+        and getattr(
+            ats_score,
+            "required_missing",
+            0,
+        )
+    ):
         return True
 
     return False
 
 
-def _build_feedback(page_count, evidence_flags, ats_score) -> str:
+def _build_feedback(
+    page_count,
+    evidence_flags,
+    ats_score,
+) -> str:
     """
-    Turn one failed attempt's diagnostics into plain-text feedback for the
-    next tailoring attempt's prompt (see llm_tailor._feedback_section).
+    Turn one failed attempt's diagnostics into feedback for the
+    next tailoring attempt.
     """
 
     lines = []
 
     if page_count is not None and page_count != 1:
         lines.append(
-            f"- The resume was {page_count} page(s) long; it must fit "
-            "exactly one page. Shorten bullets, reduce skill categories, "
-            "or tighten the summary."
+            f"- The resume was {page_count} page(s) long; "
+            "it must fit exactly one page. Shorten bullets, "
+            "reduce skill categories, or tighten the summary."
         )
 
     if evidence_flags:
         lines.append(
-            "- The following bullets could not be verified against the "
-            "MASTER RESUME and must be rewritten (using only MASTER RESUME "
-            "facts) or removed -- do not invent replacements:"
+            "- The following bullets could not be verified "
+            "against the MASTER RESUME and must be rewritten "
+            "using only MASTER RESUME facts or removed. "
+            "Do not invent replacements:"
         )
+
         max_flags_shown = 8
+
         for flag in evidence_flags[:max_flags_shown]:
-            reasons = "; ".join(getattr(flag, "reasons", []) or [])
-            lines.append(
-                f'    [{flag.source_name}] "{flag.bullet}" -- {reasons}'
+            reasons = "; ".join(
+                getattr(
+                    flag,
+                    "reasons",
+                    [],
+                )
+                or []
             )
+
+            lines.append(
+                f'    [{flag.source_name}] '
+                f'"{flag.bullet}" -- {reasons}'
+            )
+
         if len(evidence_flags) > max_flags_shown:
             lines.append(
-                f"    ... and {len(evidence_flags) - max_flags_shown} "
+                f"    ... and "
+                f"{len(evidence_flags) - max_flags_shown} "
                 "more flagged bullet(s)."
             )
 
-    if ats_score is not None and getattr(ats_score, "required_missing", 0):
-        lines.append(
-            "- The following REQUIRED job-description keywords are not "
-            "reflected anywhere in the resume. Where genuinely supported "
-            "by the MASTER RESUME, incorporate them naturally; do not "
-            "fabricate experience or skills that aren't in the MASTER "
-            "RESUME just to cover a keyword:"
+    if (
+        ats_score is not None
+        and getattr(
+            ats_score,
+            "required_missing",
+            0,
         )
-        for keyword in (ats_score.missing_keywords or [])[:10]:
-            lines.append(f"    - {keyword}")
+    ):
+        lines.append(
+            "- The following REQUIRED job-description "
+            "keywords are not reflected anywhere in the resume. "
+            "Where genuinely supported by the MASTER RESUME, "
+            "incorporate them naturally. Do not fabricate "
+            "experience or skills:"
+        )
+
+        for keyword in (
+            ats_score.missing_keywords or []
+        )[:10]:
+            lines.append(
+                f"    - {keyword}"
+            )
 
     return "\n".join(lines)
 
@@ -235,20 +459,16 @@ def _build_feedback(page_count, evidence_flags, ats_score) -> str:
 # ============================================================
 
 def load_master_resume(
-    path: Path = None
+    path: Path = None,
 ) -> dict:
-
     path = (
         path
         or config.MASTER_RESUME_PATH
     )
 
-    path = Path(
-        path
-    ).resolve()
+    path = Path(path).resolve()
 
     if not path.exists():
-
         raise FileNotFoundError(
             "Master resume not found:\n"
             + str(path)
@@ -257,16 +477,14 @@ def load_master_resume(
     with open(
         path,
         "r",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as f:
-
         resume = yaml.safe_load(f)
 
     if not isinstance(
         resume,
-        dict
+        dict,
     ):
-
         raise RuntimeError(
             "Master resume YAML must contain "
             "a dictionary/object."
@@ -287,43 +505,49 @@ def generate_resume(
     strict_one_page: bool = True,
     max_iterations: int = None,
 ) -> Path:
-
     """
     Full pipeline:
 
         1. Analyze JD
-        2. Tailor resume (may retry, see below)
-        3. Render LaTeX
-        4. Compile PDF
+        2. Match evidence
+        3. Tailor resume
+        4. Score ATS
+        5. Validate evidence
+        6. Render LaTeX
+        7. Compile PDF
 
     Iterative refinement:
       max_iterations controls how many tailoring attempts are made.
-      Defaults to config.MAX_TAILOR_ITERATIONS (itself defaulting to 1 --
-      the original single-shot behavior). When set above 1, an attempt
-      that overflows one page, has unsupported-claim flags, or is missing
-      REQUIRED JD keywords is fed back to the LLM as specific, factual
-      feedback and retried, up to max_iterations attempts total. The last
-      attempt made is always the one rendered/returned.
 
-    If the final attempt's PDF exceeds one page:
-      - The PDF and .tex files are always kept on disk (never discarded).
-      - A diagnostic report is written alongside them breaking down bullet/
-        section counts so the overflow can be traced and trimmed.
-      - If strict_one_page is True (default), a RuntimeError is raised
-        pointing at both files. If False, a warning is printed instead and
-        the (overflowing) PDF path is returned.
+    If the final PDF exceeds one page:
+      - PDF and TeX are retained
+      - diagnostic report is written
+      - strict_one_page=True raises RuntimeError
+      - strict_one_page=False returns the PDF
     """
 
-    if not job_description.strip():
+    if not isinstance(
+        job_description,
+        str,
+    ):
+        raise TypeError(
+            "job_description must be a string."
+        )
 
+    if not job_description.strip():
         raise ValueError(
             "Job description cannot be empty."
         )
 
     if max_iterations is None:
-        max_iterations = config.MAX_TAILOR_ITERATIONS
+        max_iterations = (
+            config.MAX_TAILOR_ITERATIONS
+        )
 
-    max_iterations = max(1, int(max_iterations))
+    max_iterations = max(
+        1,
+        int(max_iterations),
+    )
 
     # --------------------------------------------------------
     # Load master resume
@@ -334,25 +558,35 @@ def generate_resume(
     )
 
     # --------------------------------------------------------
-    # Analyze JD (once -- does not depend on tailoring attempt)
+    # Analyze JD
     # --------------------------------------------------------
 
-    print("[1/4] Analyzing job description...")
-
-    jd_requirements = extract_requirements(job_description)
-    jd_requirements = match_evidence(
-        jd_requirements,
-        master_resume
+    print(
+        "[1/4] Analyzing job description..."
     )
-    # The JD analyzer normally returns a JDAnalysis object.
-    # Some tests/mocks may return a list or another compatible value,
-    # so only print the formatted analysis when we have a real JDAnalysis.
-    if isinstance(jd_requirements, JDAnalysis):
-        print_analysis(jd_requirements)
+
+    jd_analysis = extract_requirements(
+        job_description
+    )
+
+    # Match the extracted requirements against the master
+    # resume while preserving compatibility with mocks/tests
+    # that may return a list.
+    jd_requirements = match_evidence(
+        jd_analysis,
+        master_resume,
+    )
+
+    if isinstance(
+        jd_analysis,
+        JDAnalysis,
+    ):
+        print_analysis(
+            jd_analysis
+        )
 
     # --------------------------------------------------------
-    # Filename (fixed across attempts, so each retry overwrites
-    # the same .tex/.pdf rather than littering the output dir)
+    # Filename
     # --------------------------------------------------------
 
     timestamp = datetime.now().strftime(
@@ -363,16 +597,14 @@ def generate_resume(
         p
         for p in (
             company,
-            role
+            role,
         )
         if p
     ]
 
     slug = (
         _slugify(
-            "_".join(
-                slug_parts
-            )
+            "_".join(slug_parts)
         )
         if slug_parts
         else "resume"
@@ -388,7 +620,7 @@ def generate_resume(
     )
 
     # --------------------------------------------------------
-    # Tailor (with retry loop)
+    # Tailor with retry loop
     # --------------------------------------------------------
 
     feedback = None
@@ -396,12 +628,20 @@ def generate_resume(
     pdf_path = None
     page_count = None
 
-    for attempt in range(1, max_iterations + 1):
+    for attempt in range(
+        1,
+        max_iterations + 1,
+    ):
 
         if max_iterations > 1:
-            print(f"[2/4] Tailoring resume (attempt {attempt}/{max_iterations})...")
+            print(
+                f"[2/4] Tailoring resume "
+                f"(attempt {attempt}/{max_iterations})..."
+            )
         else:
-            print("[2/4] Tailoring resume...")
+            print(
+                "[2/4] Tailoring resume..."
+            )
 
         if feedback:
             tailored = tailor_resume(
@@ -414,37 +654,166 @@ def generate_resume(
             tailored = tailor_resume(
                 master_resume,
                 job_description,
-                jd_requirements
+                jd_requirements,
             )
 
+        # ----------------------------------------------------
+        # ATS SCORE
+        # ----------------------------------------------------
+
+        def _requirement_text(item):
+            """Extract plain requirement text from requirement objects."""
+
+            if isinstance(item, str):
+                return item.strip()
+
+            # EvidenceMatch -> JDRequirement
+            requirement = getattr(item, "requirement", None)
+
+            if requirement is not None:
+                if isinstance(requirement, str):
+                    return requirement.strip()
+
+                nested = getattr(requirement, "requirement", None)
+
+                if nested is not None:
+                    return str(nested).strip()
+
+                text = getattr(requirement, "text", None)
+
+                if text is not None:
+                    return str(text).strip()
+
+                return str(requirement).strip()
+
+            text = getattr(item, "text", None)
+
+            if text is not None:
+                return str(text).strip()
+
+            return str(item).strip()
+
+
+        def _tailored_resume_text(value):
+            """Convert a structured tailored resume into searchable text."""
+
+            if isinstance(value, str):
+                return value
+
+            if isinstance(value, dict):
+                return json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    default=lambda obj: (
+                        obj.model_dump()
+                        if hasattr(obj, "model_dump")
+                        else vars(obj)
+                        if hasattr(obj, "__dict__")
+                        else str(obj)
+                    ),
+                )
+
+            if hasattr(value, "model_dump"):
+                return json.dumps(
+                    value.model_dump(),
+                    ensure_ascii=False,
+                )
+
+            if hasattr(value, "__dict__"):
+                return json.dumps(
+                    vars(value),
+                    ensure_ascii=False,
+                    default=str,
+                )
+
+            return str(value)
+
+
+        tailored_text = _tailored_resume_text(tailored)
+
+        required_keywords = []
+
+        for item in jd_requirements or []:
+            requirement = _requirement_text(item)
+
+            if requirement:
+                required_keywords.append(requirement)
+
+        # Remove duplicates while preserving order.
+        seen_keywords = set()
+        unique_keywords = []
+
+        for keyword in required_keywords:
+            key = keyword.lower()
+
+            if key not in seen_keywords:
+                seen_keywords.add(key)
+                unique_keywords.append(keyword)
+
+        required_keywords = unique_keywords
+
+        # IMPORTANT:
+        # Use positional arguments here because existing tests/mocks
+        # monkeypatch score_keyword_coverage with positional lambdas.
         ats_score = score_keyword_coverage(
-            tailored,
-            jd_requirements
+            tailored_text,
+            required_keywords,
         )
-        print_ats_score(ats_score)
+
+        # ----------------------------------------------------
+        # Evidence validation
+        # ----------------------------------------------------
 
         evidence_flags = flag_unsupported_bullets(
             tailored,
-            master_resume
+            master_resume,
         )
+
         total_bullets = sum(
             len(item.get("bullets", []))
-            for section in ("experience", "projects")
-            for item in tailored.get(section, [])
-            if isinstance(item, dict) and isinstance(item.get("bullets", []), list)
+            for section in (
+                "experience",
+                "projects",
+            )
+            for item in tailored.get(
+                section,
+                [],
+            )
+            if (
+                isinstance(item, dict)
+                and isinstance(
+                    item.get(
+                        "bullets",
+                        [],
+                    ),
+                    list,
+                )
+            )
         )
-        print_evidence_check(evidence_flags, total_bullets)
+
+        print_evidence_check(
+            evidence_flags,
+            total_bullets,
+        )
+
+        # ----------------------------------------------------
+        # Render LaTeX
+        # ----------------------------------------------------
 
         print(
-            f"[3/4] Rendering LaTeX -> "
+            "[3/4] Rendering LaTeX -> "
             f"{tex_output_path}"
         )
 
         render_latex(
             tailored,
             config.RESUME_TEMPLATE_PATH,
-            tex_output_path
+            tex_output_path,
         )
+
+        # ----------------------------------------------------
+        # Compile PDF
+        # ----------------------------------------------------
 
         print(
             "[4/4] Compiling PDF..."
@@ -452,10 +821,16 @@ def generate_resume(
 
         pdf_path = compile_pdf(
             tex_output_path,
-            config.OUTPUT_PDF_DIR
+            config.OUTPUT_PDF_DIR,
         )
 
-        page_count = get_pdf_page_count(pdf_path)
+        page_count = get_pdf_page_count(
+            pdf_path
+        )
+
+        # ----------------------------------------------------
+        # Decide whether retry is necessary
+        # ----------------------------------------------------
 
         has_issues = _attempt_has_issues(
             page_count,
@@ -463,13 +838,17 @@ def generate_resume(
             ats_score,
         )
 
-        if not has_issues or attempt >= max_iterations:
+        if (
+            not has_issues
+            or attempt >= max_iterations
+        ):
             break
 
         print(
-            f"Attempt {attempt}/{max_iterations} had issues; "
-            f"retrying with feedback..."
+            f"Attempt {attempt}/{max_iterations} "
+            "had issues; retrying with feedback..."
         )
+
         feedback = _build_feedback(
             page_count,
             evidence_flags,
@@ -477,7 +856,7 @@ def generate_resume(
         )
 
     # --------------------------------------------------------
-    # One-page enforcement (applies to the last attempt made)
+    # One-page enforcement
     # --------------------------------------------------------
 
     if page_count != 1:
@@ -490,16 +869,20 @@ def generate_resume(
         )
 
         message = (
-            f"Generated resume exceeds one page: "
+            "Generated resume exceeds one page: "
             f"{page_count} pages detected.\n"
             f"PDF (kept on disk):  {pdf_path}\n"
             f"Diagnostic report:   {report_path}"
         )
 
         if strict_one_page:
-            raise RuntimeError(message)
+            raise RuntimeError(
+                message
+            )
 
-        print(f"WARNING: {message}")
+        print(
+            f"WARNING: {message}"
+        )
 
     print(
         f"Done: {pdf_path}"
