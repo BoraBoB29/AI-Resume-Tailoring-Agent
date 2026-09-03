@@ -178,7 +178,7 @@ class ResumeTailor:
         self,
         categories,
         max_categories=6,
-        max_values=8
+        max_values=12
     ):
         """Normalize skills into compact, role-neutral resume categories.
 
@@ -1376,7 +1376,9 @@ EMOTORAD:
 
 Target 5–6 bullets; prefer 6 when supported.
 
-Each bullet should normally be 18–30 words and approximately 1–2 lines in the final PDF.
+Each bullet should be 24–30 words, so it reliably wraps to exactly two lines
+in the final PDF (not one short line, not three). Do not write a bullet under
+22 words.
 
 Prefer using the fuller, specific wording from the MASTER RESUME when it remains
 faithful. Recombine closely related source facts to add context, tools, workflows,
@@ -1454,7 +1456,8 @@ Never create a project from the JD.
 For each project:
 
 - Generate 2–3 internal supporting facts.
-- The FIRST bullet MUST be a polished, concise 20–35 word project description.
+- The FIRST bullet MUST be a polished, concise 24–30 word project description.
+- Do not write the first bullet under 22 words.
 - The first bullet must contain the most important technology, method, metric, and/or outcome.
 - The first bullet must read naturally as a standalone resume sentence.
 - Do not begin with fragments.
@@ -1477,7 +1480,8 @@ SKILLS
 Return 5–6 meaningful categories.
 
 Each category should normally contain
-5–8 skills.
+9–12 skills, so the category line fills
+approximately two full lines in the rendered PDF.
 
 Prioritize:
 
@@ -1589,7 +1593,8 @@ Project descriptions:
 1 substantive description per project
 
 Project description length:
-approximately 30–42 words, using supported details from the MASTER RESUME
+24–30 words (reliably wraps to two lines; the title prefix takes up part of
+line one, so avoid going above 30 words even for a project with a short name)
 
 Certifications:
 canonical certifications

@@ -535,17 +535,4 @@ def render_latex(
     )
 
     return output_path
-    email_link = email
-    linkedin_link = (
-        rf"\href{{https://{linkedin}}}{{{linkedin}}}"
-        if linkedin else ""
-    )
-    github_link = (
-        rf"\enspace $|$ \enspace\href{{https://{github}}}{{{github}}}"
-        if github else ""
-    )
-    portfolio_link = (
-        rf"\enspace $|$ \enspace\href{{https://{portfolio}}}{{{portfolio}}}"
-        if portfolio else ""
-    )
 

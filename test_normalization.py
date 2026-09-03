@@ -117,7 +117,7 @@ def test_normalize_skills_bounds_categories_and_values(tailor):
     result = tailor._normalize_skills({"skills": None}, {"skills": {"categories": categories}})
 
     assert len(result["skills"]["categories"]) <= 6
-    assert all(len(values) == 8 for values in result["skills"]["categories"].values())
+    assert all(len(values) == 12 for values in result["skills"]["categories"].values())
     assert "Additional Skills" not in result["skills"]["categories"]
 
 
